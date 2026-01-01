@@ -1,0 +1,530 @@
+defmodule Livebook.Runtime.Definitions do
+  @kino_requirement "~> 0.19.0"
+
+  def kino_requirement do
+    @kino_requirement
+  end
+
+  kino = %{
+    name: "kino",
+    dependency: %{dep: {:kino, @kino_requirement}, config: []}
+  }
+
+  kino_vega_lite = %{
+    name: "kino_vega_lite",
+    dependency: %{dep: {:kino_vega_lite, "~> 0.1.11"}, config: []}
+  }
+
+  kino_db = %{
+    name: "kino_db",
+    dependency: %{dep: {:kino_db, "~> 0.5.0"}, config: []}
+  }
+
+  exqlite = %{
+    name: "exqlite",
+    dependency: %{dep: {:exqlite, "~> 0.23.0"}, config: []}
+  }
+
+  kino_maplibre = %{
+    name: "kino_maplibre",
+    dependency: %{dep: {:kino_maplibre, "~> 0.1.12"}, config: []}
+  }
+
+  kino_slack = %{
+    name: "kino_slack",
+    dependency: %{dep: {:kino_slack, "~> 0.1.1"}, config: []}
+  }
+
+  kino_bumblebee = %{
+    name: "kino_bumblebee",
+    dependency: %{dep: {:kino_bumblebee, "~> 0.5.0"}, config: []}
+  }
+
+  exla = %{
+    name: "exla",
+    dependency: %{dep: {:exla, ">= 0.0.0"}, config: [nx: [default_backend: EXLA.Backend]]}
+  }
+
+  torchx = %{
+    name: "torchx",
+    dependency: %{dep: {:torchx, ">= 0.0.0"}, config: [nx: [default_backend: Torchx.Backend]]}
+  }
+
+  kino_flame = %{
+    name: "kino_flame",
+    dependency: %{dep: {:kino_flame, "~> 0.1.5"}, config: []}
+  }
+
+  flame_k8s_backend = %{
+    name: "flame_k8s_backend",
+    dependency: %{dep: {:flame_k8s_backend, "~> 0.5"}, config: []}
+  }
+
+  stb_image = %{
+    name: "stb_image",
+    dependency: %{dep: {:stb_image, "~> 0.6.9"}, config: []}
+  }
+
+  xlsx_reader = %{
+    name: "xlsx_reader",
+    dependency: %{dep: {:xlsx_reader, "~> 0.8.5"}, config: []}
+  }
+
+  yaml_elixir = %{
+    name: "yaml_elixir",
+    dependency: %{dep: {:yaml_elixir, "~> 2.0"}, config: []}
+  }
+
+  adbc = %{
+    name: "adbc",
+    dependency: %{dep: {:adbc, "~> 0.12"}, config: []}
+  }
+
+  windows? = match?({:win32, _}, :os.type())
+  nx_backend_package = if(windows?, do: torchx, else: exla)
+
+  @smart_cell_definitions [
+    %{
+      kind: "Elixir.KinoDB.ConnectionCell",
+      name: "Database connection",
+      requirement_presets: [
+        %{
+          name: "Clickhouse",
+          packages: [
+            kino_db,
+            %{
+              name: "req_ch",
+              dependency: %{dep: {:req_ch, ">= 0.0.0"}, config: []}
+            },
+            adbc
+          ]
+        },
+        %{
+          name: "DuckDB",
+          packages: [
+            kino_db,
+            %{
+              name: "adbc",
+              dependency: %{dep: {:adbc, ">= 0.0.0"}, config: [adbc: [drivers: [:duckdb]]]}
+            }
+          ]
+        },
+        %{
+          name: "Google BigQuery",
+          packages: [
+            kino_db,
+            %{
+              name: "adbc",
+              dependency: %{dep: {:adbc, ">= 0.0.0"}, config: [adbc: [drivers: [:bigquery]]]}
+            }
+          ]
+        },
+        %{
+          name: "MySQL",
+          packages: [
+            kino_db,
+            %{name: "myxql", dependency: %{dep: {:myxql, ">= 0.0.0"}, config: []}}
+          ]
+        },
+        %{
+          name: "PostgreSQL",
+          packages: [
+            kino_db,
+            %{name: "postgrex", dependency: %{dep: {:postgrex, ">= 0.0.0"}, config: []}}
+          ]
+        },
+        %{
+          name: "Snowflake",
+          packages: [
+            kino_db,
+            %{
+              name: "adbc",
+              dependency: %{dep: {:adbc, ">= 0.0.0"}, config: [adbc: [drivers: [:snowflake]]]}
+            }
+          ]
+        },
+        %{
+          name: "SQLite",
+          packages: [kino_db, exqlite]
+        },
+        %{
+          name: "SQLServer",
+          packages: [
+            kino_db,
+            %{name: "tds", dependency: %{dep: {:tds, ">= 0.0.0"}, config: []}}
+          ]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoDB.SQLCell",
+      name: "SQL query",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino_db]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoVegaLite.ChartCell",
+      name: "Chart",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino_vega_lite]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoMapLibre.MapCell",
+      name: "Map",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino_maplibre]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoSlack.MessageCell",
+      name: "Slack message",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino_slack]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoBumblebee.TaskCell",
+      name: "Neural Network task",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino_bumblebee, nx_backend_package]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.Kino.RemoteExecutionCell",
+      name: "Remote execution",
+      requirement_presets: [
+        %{
+          name: "Default",
+          packages: [kino]
+        }
+      ]
+    },
+    %{
+      kind: "Elixir.KinoFLAME.RunnerCell",
+      name: "FLAME runner",
+      requirement_presets: [
+        %{
+          name: "Fly",
+          packages: [kino_flame]
+        },
+        %{
+          name: "Kubernetes",
+          packages: [kino_flame, flame_k8s_backend, yaml_elixir]
+        }
+      ]
+    }
+  ]
+
+  @example_snippet_definitions [
+    %{
+      name: "Form",
+      icon: "bill-line",
+      variants: [
+        %{
+          name: "Default",
+          source: """
+          form =
+            Kino.Control.form(
+              [
+                name: Kino.Input.text("Name")
+              ],
+              submit: "Submit"
+            )
+
+          Kino.listen(form, fn event ->
+            IO.inspect(event)
+          end)
+
+          form\
+          """,
+          packages: [kino]
+        }
+      ]
+    }
+  ]
+
+  @file_action_snippet_definitions [
+    %{
+      type: :file_action,
+      file_types: :any,
+      description: "Read file content",
+      source: """
+      content =
+        Kino.FS.file_path("{{NAME}}")
+        |> File.read!()\
+      """,
+      packages: [kino]
+    },
+    %{
+      type: :file_action,
+      file_types: ["application/json"],
+      description: "Parse JSON content",
+      source: """
+      data =
+        Kino.FS.file_path("{{NAME}}")
+        |> File.read!()
+        |> JSON.decode!()
+
+      Kino.Tree.new(data)\
+      """,
+      packages: [kino]
+    },
+    %{
+      type: :file_action,
+      file_types: ["text/csv"],
+      description: "Load into DuckDB",
+      source: """
+      Adbc.download_driver!(:duckdb)
+      db = Kino.start_child!({Adbc.Database, driver: :duckdb})
+      conn = Kino.start_child!({Adbc.Connection, database: db})
+      path = Kino.FS.file_path("{{NAME}}")
+      Adbc.Connection.query!(conn, "SELECT * FROM read_csv($1)", [path])
+      """,
+      packages: [kino, kino_db, adbc]
+    },
+    %{
+      type: :file_action,
+      file_types: [".parquet"],
+      description: "Load into DuckDB",
+      source: """
+      Adbc.download_driver!(:duckdb)
+      db = Kino.start_child!({Adbc.Database, driver: :duckdb})
+      conn = Kino.start_child!({Adbc.Connection, database: db})
+      path = Kino.FS.file_path("{{NAME}}")
+      Adbc.Connection.query!(conn, "SELECT * FROM read_parquet($1)", [path])
+      """,
+      packages: [kino, kino_db, adbc]
+    },
+    %{
+      type: :file_action,
+      file_types: ["image/*"],
+      description: "Classify image",
+      source: """
+      # To explore more models, see "+ Smart" > "Neural Network task"
+
+      {:ok, model_info} = Bumblebee.load_model({:hf, "microsoft/resnet-50"})
+      {:ok, featurizer} = Bumblebee.load_featurizer({:hf, "microsoft/resnet-50"})
+
+      #{if windows? do
+        """
+        serving = Bumblebee.Vision.image_classification(model_info, featurizer)\
+        """
+      else
+        """
+        serving =
+          Bumblebee.Vision.image_classification(model_info, featurizer,
+            compile: [batch_size: 1],
+            defn_options: [compiler: EXLA]
+          )\
+        """
+      end}
+
+      image = Kino.FS.file_path("{{NAME}}") |> StbImage.read_file!()
+
+      output = Nx.Serving.run(serving, image)\
+      """,
+      packages: [kino_bumblebee, nx_backend_package, stb_image]
+    },
+    %{
+      type: :file_action,
+      file_types: ["image/*"],
+      description: "Describe image",
+      source: """
+      # To explore more models, see "+ Smart" > "Neural Network task"
+
+      repo = {:hf, "Salesforce/blip-image-captioning-base"}
+      {:ok, model_info} = Bumblebee.load_model(repo)
+      {:ok, featurizer} = Bumblebee.load_featurizer(repo)
+      {:ok, tokenizer} = Bumblebee.load_tokenizer(repo)
+      {:ok, generation_config} = Bumblebee.load_generation_config(repo)
+      generation_config = Bumblebee.configure(generation_config, max_new_tokens: 100)
+
+      #{if windows? do
+        """
+        serving = Bumblebee.Vision.image_to_text(model_info, featurizer, tokenizer, generation_config)\
+        """
+      else
+        """
+        serving =
+          Bumblebee.Vision.image_to_text(model_info, featurizer, tokenizer, generation_config,
+            compile: [batch_size: 1],
+            defn_options: [compiler: EXLA]
+          )\
+        """
+      end}
+
+      image = Kino.FS.file_path("{{NAME}}") |> StbImage.read_file!()
+
+      Nx.Serving.run(serving, image)\
+      """,
+      packages: [kino_bumblebee, nx_backend_package, stb_image]
+    },
+    %{
+      type: :file_action,
+      file_types: ["audio/*"],
+      description: "Transcribe speech",
+      source:
+        """
+        # To explore more models, see "+ Smart" > "Neural Network task"
+
+        {:ok, model_info} = Bumblebee.load_model({:hf, "openai/whisper-tiny"})
+        {:ok, featurizer} = Bumblebee.load_featurizer({:hf, "openai/whisper-tiny"})
+        {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, "openai/whisper-tiny"})
+        {:ok, generation_config} = Bumblebee.load_generation_config({:hf, "openai/whisper-tiny"})
+        generation_config = Bumblebee.configure(generation_config, max_new_tokens: 100)
+
+        """ <>
+          if windows? do
+            """
+            serving =
+              Bumblebee.Audio.speech_to_text_whisper(model_info, featurizer, tokenizer, generation_config,
+                chunk_num_seconds: 30,
+                timestamps: :segments,
+                stream: true,
+                compile: [batch_size: 4]
+              )
+            """
+          else
+            """
+            serving =
+              Bumblebee.Audio.speech_to_text_whisper(model_info, featurizer, tokenizer, generation_config,
+                chunk_num_seconds: 30,
+                timestamps: :segments,
+                stream: true,
+                compile: [batch_size: 4],
+                defn_options: [compiler: EXLA]
+              )
+            """
+          end <>
+          ~S"""
+
+          path = Kino.FS.file_path("{{NAME}}")
+          Kino.render(Kino.Text.new("(Start of transcription)", chunk: true))
+
+          for chunk <- Nx.Serving.run(serving, {:file, path}) do
+            [start_mark, end_mark] =
+              for seconds <- [chunk.start_timestamp_seconds, chunk.end_timestamp_seconds] do
+                seconds
+                |> round()
+                |> Time.from_seconds_after_midnight()
+                |> Time.to_string()
+              end
+
+            text = "\n#{start_mark}-#{end_mark}: #{chunk.text}"
+            Kino.render(Kino.Text.new(text, chunk: true))
+          end
+
+          Kino.render(Kino.Text.new("\n(End of transcription)", chunk: true))
+          :ok
+          """,
+      packages: [kino_bumblebee, nx_backend_package]
+    },
+    %{
+      type: :file_action,
+      file_types: [".db", ".sqlite"],
+      description: "Describe SQLite database",
+      source: """
+      database_path = Kino.FS.file_path("{{NAME}}")
+      {:ok, conn} = Kino.start_child({Exqlite, database: database_path})
+
+      Exqlite.query!(conn, "PRAGMA table_list", [])\
+      """,
+      packages: [kino_db, exqlite]
+    },
+    %{
+      type: :file_action,
+      file_types: [".xlsx", ".xlsm"],
+      description: "Read sheets",
+      source: """
+      xlsx_file = Kino.FS.file_path("{{NAME}}")
+      {:ok, package} = XlsxReader.open(xlsx_file)
+
+      tabs =
+        for sheet <- XlsxReader.sheet_names(package) do
+          maps =
+            case XlsxReader.sheet(package, sheet) do
+              {:ok, []} ->
+                []
+
+              {:ok, [header | rows]} ->
+                Enum.map(rows, fn row -> header |> Enum.zip(row) |> Map.new() end)
+            end
+
+          {sheet, Kino.DataTable.new(maps)}
+        end
+
+      Kino.Layout.tabs(tabs)
+      """,
+      packages: [kino, xlsx_reader]
+    }
+  ]
+
+  @spec smart_cell_definitions() :: list(Livebook.Runtime.smart_cell_definition())
+  def smart_cell_definitions(), do: @smart_cell_definitions
+
+  @doc """
+  Code snippet with fixed source, serving as an example or boilerplate.
+  """
+  @spec example_snippet_definitions() ::
+          list(%{
+            name: String.t(),
+            icon: String.t(),
+            variants:
+              list(%{
+                name: String.t(),
+                source: String.t(),
+                packages: list(Livebook.Runtime.package())
+              })
+          })
+  def example_snippet_definitions(), do: @example_snippet_definitions
+
+  @doc """
+  Code snippet for acting on files of the given type.
+
+  The action is applicable to files matching any of the specified types,
+  where a type can be either:
+
+    * specific MIME type, like `text/csv`
+    * MIME type family, like `image/*`
+    * file extension, like `.csv`
+
+  The source is expected to include `{{NAME}}`, which is replaced with
+  the actual file name.
+  """
+  @spec file_action_snippet_definitions() ::
+          list(%{
+            type: :file_action,
+            file_types: :any | list(String.t()),
+            description: String.t(),
+            source: String.t(),
+            packages: list(Livebook.Runtime.package())
+          })
+  def file_action_snippet_definitions(), do: @file_action_snippet_definitions
+
+  def pythonx_dependency() do
+    %{dep: {:pythonx, "~> 0.4.2"}, config: []}
+  end
+
+  def kino_pythonx_dependency() do
+    %{dep: {:kino_pythonx, "~> 0.1.0"}, config: []}
+  end
+
+  def pythonx_requirement(), do: "~> 0.4.0"
+end

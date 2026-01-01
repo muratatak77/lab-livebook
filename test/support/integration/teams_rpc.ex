@@ -1,0 +1,275 @@
+defmodule Livebook.TeamsRPC do
+  alias Livebook.Factory
+
+  def subscribe(node, parent, deployment_group, org) do
+    :erpc.call(node, TeamsRPC, :subscribe, [parent, deployment_group, org])
+  end
+
+  # Read resource
+
+  def get_org_request!(node, id) do
+    :erpc.call(node, TeamsRPC, :get_org_request!, [id])
+  end
+
+  def get_org_request_by!(node, opts) do
+    :erpc.call(node, TeamsRPC, :get_org_request_by!, [opts])
+  end
+
+  def get_org_key!(node, id) do
+    :erpc.call(node, TeamsRPC, :get_org_key!, [id])
+  end
+
+  def get_deployment_group!(node, id) do
+    :erpc.call(node, TeamsRPC, :get_deployment_group!, [id])
+  end
+
+  def get_auth_request_by_code!(node, code) do
+    :erpc.call(node, TeamsRPC, :get_auth_request_by_code!, [code])
+  end
+
+  def get_apps_metadatas(node, id) do
+    :erpc.call(node, TeamsRPC, :get_apps_metadatas, [id])
+  end
+
+  # Create resource
+
+  def create_user(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_user, [attrs])
+  end
+
+  def create_secret(node, team, org_key, attrs \\ []) do
+    attrs = Keyword.merge(attrs, hub_id: team.id)
+    secret = Factory.build(:secret, attrs)
+
+    derived_key = Livebook.Teams.derive_key(team.teams_key)
+    value = Livebook.Teams.encrypt(secret.value, derived_key)
+
+    attrs =
+      %{
+        name: secret.name,
+        value: value,
+        org_key: org_key
+      }
+
+    :erpc.call(node, TeamsRPC, :create_secret, [attrs])
+    secret
+  end
+
+  def create_org(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_org, [attrs])
+  end
+
+  def update_org(node, org, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :update_org, [org, attrs])
+  end
+
+  def delete_subscription(node, org) do
+    :erpc.call(node, TeamsRPC, :delete_subscription, [org])
+  end
+
+  def create_org_key(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_org_key, [attrs])
+  end
+
+  def create_org_key_pair(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_org_key_pair, [attrs])
+  end
+
+  def create_org_request(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_org_request, [attrs])
+  end
+
+  def create_user_org(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_user_org, [attrs])
+  end
+
+  def create_file_system(node, team, org_key, file_system \\ nil) do
+    file_system =
+      if file_system,
+        do: file_system,
+        else: Factory.build(:fs_s3)
+
+    type = Livebook.FileSystems.type(file_system)
+    name = Livebook.FileSystem.external_metadata(file_system).name
+
+    file_system = %{
+      file_system
+      | id: Livebook.FileSystem.Utils.id(type, team.id, name),
+        hub_id: team.id
+    }
+
+    attrs = [
+      name: name,
+      type: String.to_atom(type),
+      value: Livebook.HubHelpers.generate_file_system_json(team, file_system),
+      org_key: org_key,
+      livebook_version: Livebook.Config.app_version()
+    ]
+
+    external_id = :erpc.call(node, TeamsRPC, :create_file_system, [attrs]).id
+    Map.replace!(file_system, :external_id, to_string(external_id))
+  end
+
+  def create_deployment_group(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_deployment_group, [attrs])
+  end
+
+  def create_deployment_group_secret(node, team, org_key, deployment_group, attrs \\ []) do
+    attrs =
+      Keyword.merge(attrs,
+        deployment_group_id: to_string(deployment_group.id),
+        hub_id: team.id
+      )
+
+    secret = Factory.build(:secret, attrs)
+
+    derived_key = Livebook.Teams.derive_key(team.teams_key)
+    value = Livebook.Teams.encrypt(secret.value, derived_key)
+
+    attrs =
+      %{
+        name: secret.name,
+        value: value,
+        org_key: org_key,
+        deployment_group: deployment_group
+      }
+
+    :erpc.call(node, TeamsRPC, :create_deployment_group_secret, [attrs])
+    secret
+  end
+
+  def create_agent_key(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_agent_key, [attrs])
+  end
+
+  def create_environment_variable(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_environment_variable, [attrs])
+  end
+
+  def create_billing_subscription(node, org) do
+    :erpc.call(node, TeamsRPC, :create_billing_subscription, [org])
+  end
+
+  def create_oidc_provider(node, org) do
+    :erpc.call(node, TeamsRPC, :create_oidc_provider, [org])
+  end
+
+  def create_authorization_group(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_authorization_group, [attrs])
+  end
+
+  def create_org_token(node, attrs \\ []) do
+    key = :erpc.call(node, TeamsRPC, :generate_org_token, [])
+    {key, :erpc.call(node, TeamsRPC, :create_org_token, [key, attrs])}
+  end
+
+  def create_app_folder(node, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :create_app_folder, [attrs])
+  end
+
+  # Update resource
+
+  def update_authorization_group(node, authorization_group, attrs, app_folders \\ []) do
+    :erpc.call(node, TeamsRPC, :update_authorization_group, [
+      authorization_group,
+      attrs,
+      app_folders
+    ])
+  end
+
+  def update_user_info_groups(node, code, groups) do
+    :erpc.call(node, TeamsRPC, :update_user_info_groups, [code, groups])
+  end
+
+  def update_deployment_group(node, deployment_group, attrs) do
+    :erpc.call(node, TeamsRPC, :update_deployment_group, [deployment_group, attrs])
+  end
+
+  def update_file_system(node, team, org_key, file_system) do
+    type = Livebook.FileSystems.type(file_system)
+    name = Livebook.FileSystem.external_metadata(file_system).name
+
+    attrs = [
+      name: name,
+      type: String.to_atom(type),
+      value: Livebook.HubHelpers.generate_file_system_json(team, file_system),
+      livebook_version: Livebook.Config.app_version()
+    ]
+
+    :erpc.call(node, TeamsRPC, :update_file_system, [file_system.external_id, org_key, attrs])
+  end
+
+  def update_app_folder(node, app_folder, attrs \\ []) do
+    :erpc.call(node, TeamsRPC, :update_app_folder, [app_folder, attrs])
+  end
+
+  # Delete resource
+
+  def delete_user_org(node, user_id, org_id) do
+    :erpc.call(node, TeamsRPC, :delete_user_org, [user_id, org_id])
+  end
+
+  def delete_deployment_group(node, deployment_group) do
+    :erpc.call(node, TeamsRPC, :delete_deployment_group, [deployment_group])
+  end
+
+  def delete_file_system(node, org_key, id) do
+    livebook_version = Livebook.Config.app_version()
+    :erpc.call(node, TeamsRPC, :delete_file_system, [id, org_key, livebook_version])
+  end
+
+  def delete_app_folder(node, app_folder) do
+    :erpc.call(node, TeamsRPC, :delete_app_folder, [app_folder])
+  end
+
+  # Actions
+
+  def upload_app_deployment(
+        node,
+        org,
+        deployment_group,
+        livebook_app_deployment,
+        encrypted_content,
+        broadast? \\ false
+      ) do
+    :erpc.call(node, TeamsRPC, :upload_app_deployment, [
+      org,
+      deployment_group,
+      livebook_app_deployment,
+      encrypted_content,
+      broadast?
+    ])
+  end
+
+  def confirm_org_request(node, org_request, user) do
+    :erpc.call(node, TeamsRPC, :confirm_org_request, [org_request, user])
+  end
+
+  def associate_user_with_org(node, user, org) do
+    :erpc.call(node, TeamsRPC, :associate_user_with_org, [user, org])
+  end
+
+  def toggle_app_deployment(node, id, org_id) do
+    :erpc.call(node, TeamsRPC, :toggle_app_deployment, [id, org_id])
+  end
+
+  def allow_auth_request(node, token) do
+    :erpc.call(node, TeamsRPC, :allow_auth_request, [token])
+  end
+
+  def revoke_auth_request(node, code) do
+    :erpc.call(node, TeamsRPC, :revoke_auth_request, [code])
+  end
+
+  def toggle_teams_authentication(node, deployment_group) do
+    :erpc.call(node, TeamsRPC, :toggle_teams_authentication, [deployment_group])
+  end
+
+  def toggle_groups_authorization(node, deployment_group) do
+    :erpc.call(node, TeamsRPC, :toggle_groups_authorization, [deployment_group])
+  end
+
+  def toggle_deployment_authorization(node, deployment_group) do
+    :erpc.call(node, TeamsRPC, :toggle_deployment_authorization, [deployment_group])
+  end
+end

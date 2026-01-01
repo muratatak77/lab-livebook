@@ -1,0 +1,178 @@
+defmodule Livebook.TestHelpers do
+  import Phoenix.LiveViewTest
+  import ExUnit.Assertions
+
+  alias Livebook.Session.Data
+
+  @doc """
+  Creates file structure according to the given specification.
+  """
+  def create_tree!(path, items) do
+    for {name, content} <- items do
+      child_path = Path.join(path, to_string(name))
+
+      case content do
+        items when is_list(items) ->
+          File.mkdir!(child_path)
+          create_tree!(child_path, items)
+
+        content when is_binary(content) ->
+          File.write!(child_path, content)
+      end
+    end
+  end
+
+  @doc """
+  Creates the given number of subdirectories and returns their paths.
+  """
+  def create_subdirs!(path, number) do
+    for n <- 1..number//1 do
+      child_path = Path.join(path, "subdir#{n}")
+      File.mkdir_p!(child_path)
+      child_path
+    end
+  end
+
+  @doc """
+  Applies the given list of operations to `Livebook.Session.Data`.
+
+  Raises if any of the operations results in an error.
+  """
+  def data_after_operations!(data \\ Data.new(), operations) do
+    operations
+    |> List.flatten()
+    |> Enum.reduce(data, fn operation, data ->
+      case Data.apply_operation(data, operation) do
+        {:ok, data, _action} ->
+          data
+
+        :error ->
+          raise "failed to set up test data, operation #{inspect(operation)} returned an error"
+      end
+    end)
+  end
+
+  @doc """
+  Converts a Unix-like absolute path into OS-compatible absolute path.
+  """
+  defmacro p("/" <> path), do: Path.expand("/") <> path
+
+  @doc """
+  Confirms the action guarded by `LivebookWeb.Confirm/3` and
+  returns the rendered result.
+  """
+  def render_confirm(view, options \\ %{}) do
+    options =
+      for {option, value} <- options,
+          into: %{},
+          do: {Atom.to_string(option), Atom.to_string(value)}
+
+    view
+    |> element(~s/[data-el-confirm-form]/)
+    |> render_submit(%{"options" => options})
+  end
+
+  @doc """
+  Starts tracing messages received by the given LiveView.
+
+  Use `assert_view_receive/2` to wait until the LiveView receives
+  a PubSub broadcast, before asserting on the rendered content.
+  Subscribing to the same topic in the test is not enough, because
+  the broadcast may reach the test before it reaches the LiveView.
+  """
+  def trace_view_messages(view) do
+    :erlang.trace(view.pid, true, [:receive])
+    :ok
+  end
+
+  @doc """
+  Asserts that the LiveView traced with `trace_view_messages/1`
+  received a message matching the given pattern.
+
+  Once this returns, any subsequent render is processed by the
+  LiveView only after handling the matched message.
+  """
+  defmacro assert_view_receive(view, pattern) do
+    quote do
+      view_pid = unquote(view).pid
+      assert_receive {:trace, ^view_pid, :receive, unquote(pattern)}
+    end
+  end
+
+  @doc """
+  Builds code that awaits for a messages before finishing.
+
+  Returns `{code, continue_fun}`, where calling `continue_fun` should
+  continue execution. Embedded runtime must be used for this to work.
+  """
+  def source_for_blocking() do
+    name = Livebook.Utils.random_short_id() |> String.to_atom()
+
+    Process.register(self(), name)
+
+    code =
+      quote do
+        # We assume the test uses the Embedded runtime, so we can
+        # target the process by name
+        send(unquote(name), {:started, self()})
+        receive do: (:finish -> :ok)
+      end
+      |> Macro.to_string()
+
+    continue_fun = fn ->
+      assert_receive {:started, pid}
+      send(pid, :finish)
+    end
+
+    {code, continue_fun}
+  end
+
+  @doc """
+  Builds a terminal output map.
+  """
+  defmacro terminal_text(text, chunk \\ false) do
+    quote do
+      %{type: :terminal_text, text: unquote(text), chunk: unquote(chunk)}
+    end
+  end
+
+  @doc """
+  Builds an error output map.
+  """
+  defmacro error_output(message) do
+    quote do
+      %{type: :error, message: unquote(message)}
+    end
+  end
+
+  def clean_message(message) do
+    message
+    |> remove_trailing_whitespace()
+    |> remove_ansi()
+  end
+
+  defp remove_trailing_whitespace(string) do
+    String.replace(string, ~r/ +$/m, "")
+  end
+
+  defp remove_ansi(string) do
+    String.replace(string, ~r/\e\[\d+m/, "")
+  end
+
+  # Returns intellisense context resulting from evaluating
+  # the given block of code in a fresh context.
+  defmacro intellisense_context_from_eval(ebin_path \\ System.tmp_dir!(), do: block) do
+    quote do
+      block = unquote(Macro.escape(block))
+      binding = []
+      env = Code.env_for_eval([])
+      {value, binding, env} = Code.eval_quoted_with_env(block, binding, env)
+
+      %{
+        env: env,
+        ebin_path: unquote(ebin_path),
+        map_binding: fn fun -> fun.(binding) end
+      }
+    end
+  end
+end

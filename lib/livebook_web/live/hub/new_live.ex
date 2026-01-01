@@ -1,0 +1,266 @@
+defmodule LivebookWeb.Hub.NewLive do
+  use LivebookWeb, :live_view
+
+  alias Livebook.Teams
+  alias Livebook.Teams.Org
+
+  on_mount LivebookWeb.SidebarHook
+
+  @check_completion_data_interval Application.compile_env(
+                                    :livebook,
+                                    :check_completion_data_interval,
+                                    3000
+                                  )
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok,
+     socket
+     |> assign(
+       page_title: "Workspace - Livebook",
+       requested_code: false,
+       org: nil,
+       verification_uri: nil,
+       form: nil,
+       button_label: nil,
+       request_code_info: nil
+     )
+     |> assign_form()}
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.layout
+      flash={@flash}
+      confirm_state={@confirm_state}
+      current_page="/hub"
+      current_user={@current_user}
+      saved_hubs={@saved_hubs}
+      teams_auth={@teams_auth}
+      notifications={@notifications}
+    >
+      <Layouts.topbar :if={Livebook.Config.warn_on_live_teams_server?()} variant="warning">
+        <strong>Beware!</strong>
+        You are running Livebook in development but this page communicates with production servers.
+      </Layouts.topbar>
+
+      <div class="flex flex-col p-4 md:px-12 md:py-7 max-w-(--breakpoint-md) mx-auto space-y-8">
+        <div>
+          <.title text="Add organization" />
+          <p class="mt-4 text-gray-700">
+            Livebook Teams enables you to deploy notebooks as internal apps or turn Livebook into a controlled environment for runbooks and production operations.
+          </p>
+          <p class="mt-4 text-gray-700">
+            To use it, you need to join a Teams organization.
+          </p>
+        </div>
+        <div class="flex flex-col space-y-4">
+          <div class="flex flex-col justify-center sm:items-center sm:m-auto">
+            <div class="flex rounded-xl bg-gray-100 p-1">
+              <ul class="flex flex-col sm:flex-row md:flex-col lg:flex-row w-full list-none gap-1">
+                <li class="group button flex w-full sm:w-72 items-center justify-center gap-1 md:gap-2 rounded-lg border py-3 md:py-2.5 px-5 transition-opacity duration-100 border-black/10 bg-white drop-shadow-sm hover:opacity-100!">
+                  <.remix_icon
+                    icon="organization-chart"
+                    class="group-hover:text-blue-600 text-lg text-blue-600"
+                  />
+                  <span class="truncate text-sm font-medium">
+                    Join an existing organization
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-col space-y-4">
+          <.form
+            :let={f}
+            for={@form}
+            id="join-org-form"
+            class="flex flex-col space-y-4"
+            phx-submit="save"
+            phx-change="validate"
+          >
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <.text_field field={f[:name]} label="Organization name" autofocus />
+              <.emoji_field field={f[:emoji]} label="Emoji" />
+            </div>
+
+            <.password_field
+              field={f[:teams_key]}
+              label="Livebook Teams key"
+            />
+
+            <div>
+              <.button :if={!@requested_code} phx-disable-with="Loading...">
+                {@button_label}
+              </.button>
+            </div>
+            <div class="invisible"></div>
+            <div :if={@requested_code} class="flex flex-col rounded-xl bg-gray-50 px-10 py-6 mt-10">
+              <div class="flex flex-col items-center rounded-xl bg-gray-50">
+                <span class="text-base font-semibold text-center text-gray-900">
+                  {@request_code_info}
+                </span>
+                <div class="text-center mt-4 text-gray-700">
+                  <span class="text-sm">
+                    1. Copy the code:
+                  </span>
+                  <div class="mt-3 text-center">
+                    <.copyclip content={@org.user_code} />
+                  </div>
+                </div>
+                <div class="text-center mt-4 text-gray-700">
+                  <span class="text-sm">
+                    2. Sign in to Livebook Teams and paste the code:
+                  </span>
+                  <div class="mt-2">
+                    <.button color="gray" outlined href={@verification_uri} target="_blank">
+                      Go to Teams
+                    </.button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </.form>
+        </div>
+      </div>
+    </Layouts.layout>
+    """
+  end
+
+  defp copyclip(assigns) do
+    ~H"""
+    <div
+      id="clipboard"
+      class="flex items-center justify-between border border-gray-200 rounded-lg px-4 py-2.5 bg-white"
+    >
+      <.icon_button class="invisible">
+        <.remix_icon icon="clipboard-line" />
+      </.icon_button>
+
+      <div
+        class="mr-4 text-brand-pink font-semibold text-xl leading-none"
+        id="clipboard-code"
+        phx-no-format
+      >{@content}</div>
+
+      <.icon_button phx-click={JS.dispatch("lb:clipcopy", to: "#clipboard-code")} type="button">
+        <.remix_icon icon="clipboard-line" />
+      </.icon_button>
+    </div>
+    """
+  end
+
+  @impl true
+  def handle_event("validate", %{"org" => attrs}, socket) do
+    changeset =
+      socket.assigns.org
+      |> Teams.change_org(attrs)
+      |> Map.replace!(:action, :validate)
+
+    {:noreply, assign_form(socket, changeset)}
+  end
+
+  def handle_event("save", %{"org" => attrs}, socket) do
+    case Teams.join_org(socket.assigns.org, attrs) do
+      {:ok, %{"device_code" => device_code} = response} ->
+        attrs = Map.merge(attrs, response)
+        changeset = Teams.change_org(socket.assigns.org, attrs)
+        org = Ecto.Changeset.apply_action!(changeset, :insert)
+
+        Process.send_after(
+          self(),
+          {:check_completion_data, device_code},
+          @check_completion_data_interval
+        )
+
+        {:noreply,
+         socket
+         |> assign(requested_code: true, org: org, verification_uri: response["verification_uri"])
+         |> assign_form(changeset)}
+
+      {:error, changeset} ->
+        {:noreply, assign_form(socket, changeset)}
+
+      {:transport_error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  @impl true
+  def handle_info({:check_completion_data, device_code}, %{assigns: %{org: org}} = socket) do
+    case Teams.get_org_request_completion_data(org, device_code) do
+      {:ok, :awaiting_confirmation} ->
+        Process.send_after(
+          self(),
+          {:check_completion_data, device_code},
+          @check_completion_data_interval
+        )
+
+        {:noreply, socket}
+
+      {:ok, %{"id" => _id, "session_token" => _session_token} = response} ->
+        hub =
+          Teams.create_hub!(%{
+            org_id: response["id"],
+            user_id: response["user_id"],
+            org_key_id: response["org_key_id"],
+            org_public_key: response["org_public_key"],
+            session_token: response["session_token"],
+            teams_key: org.teams_key,
+            hub_name: org.name,
+            hub_emoji: org.emoji
+          })
+
+        {:noreply,
+         socket
+         |> put_flash(:success, "Workspace added successfully")
+         |> push_navigate(to: ~p"/hub/#{hub.id}?show-key=confirm")}
+
+      {:error, :expired} ->
+        changeset =
+          org
+          |> Teams.change_org(%{user_code: nil})
+          |> Map.replace!(:action, :validate)
+
+        {:noreply,
+         socket
+         |> assign(requested_code: false, org: org, verification_uri: nil)
+         |> put_flash(:error, "Oh no! Your org request expired, could you please try again?")
+         |> assign_form(changeset)}
+
+      {:transport_error, message} ->
+        Process.send_after(
+          self(),
+          {:check_completion_data, device_code},
+          @check_completion_data_interval
+        )
+
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  def handle_info(_any, socket), do: {:noreply, socket}
+
+  defp assign_form(socket) do
+    org = %Org{emoji: random_emoji()}
+    changeset = Teams.change_org(org)
+
+    socket
+    |> assign(
+      org: org,
+      button_label: "Join",
+      request_code_info: "Authenticate with your organization"
+    )
+    |> assign_form(changeset)
+  end
+
+  defp assign_form(socket, %Ecto.Changeset{} = changeset) do
+    assign(socket, form: to_form(changeset))
+  end
+
+  defp random_emoji do
+    Enum.random(~w[💡 🚀 🌈 🦄 🐱 👩‍💻 ⚽️ ⭐️])
+  end
+end

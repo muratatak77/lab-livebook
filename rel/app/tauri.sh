@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Usage: ./tauri.sh [command] [options]
+#
+# Commands:
+#
+#   build   see: cargo tauri build --help
+#   dev     see: cargo tauri dev --help
+#   app     build + open app
+set -euo pipefail
+
+main() {
+  export MIX_TARGET="app"
+
+  root_dir="$(cd "$(dirname "$0")" && pwd)"
+  mix_project_dir="${root_dir}/../.."
+  app="Livebook"
+
+  (cd "$mix_project_dir" && mix deps.get)
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # When testing in Windows VM and sharing the source code directory with the host,
+      # it's better to write build artifacts to regular directories local to the VM.
+      # Skip this in CI environments to keep artifacts in standard locations.
+      if [ -z "${CI:-}" ]; then
+        tmp_dir="/tmp/${app}"
+        export MIX_HOME="${tmp_dir}/mix"
+        export MIX_DEPS_PATH="${tmp_dir}/mix/deps"
+        export MIX_BUILD_PATH="${tmp_dir}/mix/build"
+        export HEX_HOME="${tmp_dir}/hex"
+        export REBAR_CACHE_DIR="${tmp_dir}/rebar"
+        export CARGO_TARGET_DIR="${tmp_dir}/cargo/target"
+        export CARGO_HOME="${tmp_dir}/cargo/home"
+      fi
+
+      (
+        cd "${mix_project_dir}"
+        mix.bat local.hex --force --if-missing
+        mix.bat local.rebar --force --if-missing
+      )
+      os=windows
+      ;;
+    Darwin*)
+      os=darwin
+      ;;
+    Linux*)
+      os=linux
+      ;;
+  esac
+
+  profile="release"
+  for arg in "$@"; do
+    if [ "$arg" = "--debug" ]; then
+      profile="debug"
+      break
+    fi
+  done
+
+  release_root="$root_dir/src-tauri/rel-${os}"
+
+  command="${1:-}"
+
+  config="--config"
+  config_json="{\"bundle\":{\"resources\":{\"rel-${os}\":\"rel\"}}}"
+
+  if [ -z "${MIX_ENV:-}" ] && [ "$profile" = "release" ] && [ "$command" != "dev" ]; then
+    export MIX_ENV="prod"
+  fi
+
+  case "$command" in
+    dev)
+      cargo tauri "$@"
+      ;;
+    app)
+      shift
+      mix_release
+      bundles_flag=""
+      if [ "$os" = "darwin" ]; then
+        bundles_flag="--bundles app"
+      fi
+      cargo tauri build "$config" "$config_json" $bundles_flag "$@"
+      open_app "$@"
+      ;;
+    build)
+      shift
+      mix_release
+      cargo tauri build "$config" "$config_json" "$@"
+      ;;
+    *)
+      cargo tauri "$@"
+      ;;
+  esac
+}
+
+open_app() {
+  case "$os" in
+    darwin)
+      trap 'osascript -e "tell application \"$app\" to quit" >/dev/null 2>&1' INT TERM
+
+      lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+      $lsregister -u /Applications/${app}.app || true
+
+      app_path="$root_dir/src-tauri/target/$profile/bundle/macos/${app}.app"
+      open -W --stdout "$(tty)" --stderr "$(tty)" "$app_path" --args "$@"
+      ;;
+    windows)
+      echo "Installing $app..."
+      $CARGO_TARGET_DIR/$profile/bundle/nsis/${app}*setup.exe //S
+
+      echo "Running $app..."
+      "$LOCALAPPDATA/${app}/${app}.exe" "$@"
+      ;;
+  esac
+}
+
+mix_release() {
+  (
+    cd "${mix_project_dir}"
+    mix setup
+    mix release app --overwrite --path "$release_root"
+  )
+}
+
+main "$@"

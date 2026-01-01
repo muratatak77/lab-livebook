@@ -1,0 +1,99 @@
+defmodule LivebookWeb.ErrorHTML do
+  use LivebookWeb, :html
+
+  def render("404.html", assigns) do
+    ~H"""
+    <.error_page status={404} title="No Numbats here!" />
+    """
+  end
+
+  def render("403.html", assigns) do
+    ~H"""
+    <.error_page status={403} title="No Numbats allowed here!" />
+    """
+  end
+
+  def render("error.html", assigns) do
+    ~H"""
+    <.error_page status={@status} title="Something went wrong." details={@details} />
+    """
+  end
+
+  def render("401.html", assigns) do
+    ~H"""
+    <.error_page status={401} title="Not authorized" details={@details} />
+    """
+  end
+
+  def render("503.html", assigns) do
+    ~H"""
+    <.error_page
+      status={503}
+      title="Service unavailable"
+      details="The server is currently down or under maintenance"
+    />
+    """
+  end
+
+  def render("unsupported_version.html", assigns) do
+    ~H"""
+    <.error_page
+      status={503}
+      title="Livebook version not compatible"
+      details={"This Livebook version is no longer compatible with Livebook Teams. Please update this app server to #{@min_version} or later to restore access."}
+    />
+    """
+  end
+
+  def render(_template, assigns) do
+    ~H"""
+    <.error_page
+      status={@status}
+      title="Something went wrong."
+      details="Check out the console for logs for more information."
+    />
+    """
+  end
+
+  attr :status, :integer, required: true
+  attr :title, :string, required: true
+  attr :details, :string, default: nil
+
+  def error_page(assigns) do
+    ~H"""
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/svg+xml" href={~p"/favicons/favicon.svg"} />
+        <link rel="alternate icon" type="image/png" href={~p"/favicons/favicon.png"} />
+        <title>{@status} - Livebook</title>
+        <%= if LivebookWeb.Layouts.dev?() do %>
+          <script phx-track-static type="module" src="http://localhost:4432/@vite/client">
+          </script>
+          <link phx-track-static rel="stylesheet" href="http://localhost:4432/css/app.css" />
+        <% else %>
+          <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+        <% end %>
+      </head>
+      <body>
+        <div class="h-screen flex items-center justify-center bg-gray-900">
+          <div class="flex flex-col space-y-4 items-center">
+            <a href={~p"/"}>
+              <img src={~p"/images/logo.png"} height="128" width="128" alt="livebook" />
+            </a>
+            <div class="text-2xl text-gray-50">
+              {@title}
+            </div>
+            <div :if={@details} class="text-lg text-gray-50">
+              {@details}
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+  end
+end

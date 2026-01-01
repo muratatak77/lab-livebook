@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <link rel="icon" type="image/svg+xml" href={~p"/favicons/favicon.svg"} />
+    <link rel="alternate icon" type="image/png" href={~p"/favicons/favicon.png"} />
+    <.live_title>
+      {assigns[:page_title] || "Livebook"}
+    </.live_title>
+    <script>
+      window.LIVEBOOK_BASE_URL_PATH = "<%= LivebookWeb.VerifiedRoutes.base_url_path() %>";
+      window.LIVEBOOK_PUBLIC_BASE_URL_PATH = "<%= LivebookWeb.VerifiedRoutes.public_base_url_path() %>"
+    </script>
+    <%= if dev?() do %>
+      <script phx-track-static type="module" src="http://localhost:4432/@vite/client">
+      </script>
+      <link phx-track-static rel="stylesheet" href="http://localhost:4432/css/app.css" />
+      <%!-- This prevents the script to be loaded twice in Chrome --%>
+      <link rel="modulepreload" href="http://localhost:4432/js/app.js" />
+      <script phx-track-static type="module" src="http://localhost:4432/js/app.js">
+      </script>
+    <% else %>
+      <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+      <%!-- This prevents the script to be loaded twice in Chrome --%>
+      <link rel="modulepreload" href={~p"/assets/app.js"} />
+      <script phx-track-static type="module" src={~p"/assets/app.js"}>
+      </script>
+    <% end %>
+    <.dev_script />
+  </head>
+  <body
+    class="bg-white"
+    data-feature-flags={Livebook.Config.enabled_feature_flags() |> Enum.join(",")}
+    data-within-iframe={Livebook.Config.within_iframe?()}
+  >
+    {@inner_content}
+  </body>
+</html>

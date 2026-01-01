@@ -1,0 +1,70 @@
+defmodule LivebookWeb.Hub.NewLiveTest do
+  use Livebook.TeamsIntegrationCase, async: true
+
+  alias Livebook.Teams.Org
+
+  import Phoenix.LiveViewTest
+
+  @moduletag teams_for: :user
+  setup :teams
+
+  @moduletag subscribe_to_hubs_topics: [:connection]
+  @moduletag subscribe_to_teams_topics: [:clients]
+
+  test "join a Teams org and persist a new hub", %{conn: conn, node: node, user: user} do
+    %{name: name} = build(:org)
+    teams_key = Livebook.Teams.Org.teams_key()
+    key_hash = Org.key_hash(build(:org, teams_key: teams_key))
+
+    {:ok, view, _html} = live(conn, ~p"/hub")
+
+    # previously create the org and associate user with org
+    org = TeamsRPC.create_org(node, name: name)
+    TeamsRPC.create_org_key(node, org: org, key_hash: key_hash)
+    TeamsRPC.create_org_key_pair(node, org: org)
+    TeamsRPC.create_user_org(node, org: org, user: user)
+
+    # builds the form data
+    attrs = %{"org" => %{"name" => name, "teams_key" => teams_key, "emoji" => "🐈"}}
+
+    # finds the form and change data
+    form = element(view, "#join-org-form")
+    render_change(form, attrs)
+
+    # submits the form
+    render_submit(form, attrs)
+
+    # gets the org request by name and key hash
+    org_request = TeamsRPC.get_org_request_by!(node, name: name, key_hash: key_hash)
+
+    # check if the form has the url to confirm
+    link_element = element(view, "#join-org-form a")
+    assert render(link_element) =~ "/org-request/#{org_request.id}/confirm"
+
+    # force org request confirmation
+    TeamsRPC.confirm_org_request(node, org_request, user)
+
+    # wait for the c:handle_info/2 cycle
+    # check if the page redirected to edit hub page
+    # and check the flash message
+    %{"success" => "Workspace added successfully"} =
+      assert_redirect(
+        view,
+        "/hub/team-#{name}?show-key=confirm",
+        check_completion_data_interval()
+      )
+
+    # access the page and shows the teams key modal
+    {:ok, view, _html} = live(conn, "/hub/team-#{name}?show-key=confirm")
+    assert has_element?(view, "#key-modal")
+
+    # access the page when closes the modal
+    assert {:ok, view, _html} = live(conn, "/hub/team-#{name}")
+    refute has_element?(view, "#key-modal")
+
+    # checks if the hub is in the sidebar
+    assert_sidebar_hub(view, "team-#{name}", name)
+  end
+
+  defp check_completion_data_interval(), do: 2000
+end

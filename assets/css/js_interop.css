@@ -1,0 +1,397 @@
+/*
+Conditional elements display.
+
+Verious hooks and callbacks dynamically set attributes based on which
+we hide/show certain elements. This way we don't have to engage the
+server in solely client-side operations.
+*/
+
+/* Hooks */
+
+[phx-hook="Dropzone"][data-js-dragging] {
+  @apply bg-blue-100 border-blue-300;
+}
+
+/* Session */
+
+[data-el-session] {
+  /* Sections */
+
+  [data-el-notebook-headline],
+  [data-el-section-headline] {
+    &:hover [data-el-heading] {
+      @apply border-blue-200;
+    }
+
+    &[data-js-focused] [data-el-heading] {
+      @apply border-blue-300 outline-none;
+    }
+  }
+
+  [data-el-section-headline]:not(:hover, [data-js-focused])
+    [data-el-section-actions] {
+    @apply hidden;
+  }
+
+  [data-el-section][data-js-collapsed] [data-el-section-collapse-button],
+  &:not([data-js-hide-section])
+    [data-el-section][data-js-collapsed]
+    [data-el-section-content] {
+    @apply hidden;
+  }
+
+  [data-el-section]:not([data-js-collapsed])
+    :is(
+      [data-el-section-headline]:not(:hover, [data-js-focused])
+        [data-el-section-collapse-button],
+      [data-el-section-expand-button],
+      [data-el-section-subheadline-collapsed]
+    ) {
+    @apply hidden;
+  }
+
+  /* Cells */
+
+  &:not([data-js-insert-mode]) [data-el-insert-mode-indicator] {
+    @apply invisible;
+  }
+
+  [data-el-cell][data-js-hover] [data-el-cell-focus-indicator] {
+    @apply bg-blue-200;
+  }
+
+  [data-el-cell][data-js-focused] {
+    @apply border-blue-300;
+
+    [data-el-cell-focus-indicator] {
+      @apply bg-blue-300;
+    }
+  }
+
+  [data-el-cell]:not([data-js-focused]) {
+    /* We use opacity, so the buttons are focusable via tab navigation */
+
+    & [data-el-actions][data-secondary] {
+      @apply opacity-0 pointer-events-none;
+    }
+
+    &:not([data-js-hover]) [data-el-actions][data-primary] {
+      @apply opacity-0;
+    }
+  }
+
+  [data-el-cell][data-js-changed] [data-el-cell-status] {
+    @apply italic;
+  }
+
+  [data-el-cell]:not([data-js-changed])
+    [data-el-cell-status]
+    [data-el-change-indicator] {
+    @apply invisible;
+  }
+
+  [data-el-cell][data-type="markdown"]:not([data-js-insert-mode])
+    [data-el-editor-box] {
+    @apply hidden;
+  }
+
+  [data-el-cell][data-type="markdown"][data-js-insert-mode]
+    [data-el-enable-insert-mode-button] {
+    @apply hidden;
+  }
+
+  [data-el-cell][data-type="smart"][data-js-source-visible] {
+    [data-el-ui-box] {
+      @apply hidden;
+    }
+
+    [data-el-toggle-source-button] > button {
+      @apply bg-gray-100 text-gray-900;
+    }
+  }
+
+  [data-el-cell][data-type="smart"]:not([data-js-source-visible]) {
+    [data-el-editor-box] {
+      @apply hidden;
+    }
+
+    [data-el-cell-indicators] {
+      @apply static flex justify-end pt-2;
+    }
+
+    [data-el-cell-indicator] {
+      @apply bg-gray-50 border-gray-200 text-gray-500;
+    }
+  }
+
+  /* When all setup cells satisfy collapse conditions, collapse the
+     first one and hide the later ones */
+  [data-el-setup-section]:not(
+    :has(
+      [data-el-cell][data-setup]:is(
+          [data-js-focused],
+          [data-eval-validity="fresh"]:not([data-js-empty]),
+          [data-eval-errored],
+          [data-js-changed]
+        )
+    ),
+    :focus-within
+  ) {
+    [data-el-cell][data-setup]:not(:first-child) {
+      @apply hidden;
+    }
+
+    [data-el-cell][data-setup]:first-child {
+      [data-el-editor-box] {
+        @apply hidden;
+      }
+
+      [data-el-outputs-container] {
+        @apply hidden;
+      }
+
+      [data-el-cell-indicator] {
+        @apply bg-gray-50 border-gray-200 text-gray-500;
+      }
+    }
+
+    [data-el-language-buttons] {
+      @apply hidden;
+    }
+  }
+
+  /* This is "else" for the above  */
+  [data-el-setup-section]:is(
+    :has(
+      [data-el-cell][data-setup]:is(
+          [data-js-focused],
+          [data-eval-validity="fresh"]:not([data-js-empty]),
+          [data-eval-errored],
+          [data-js-changed]
+        )
+    ),
+    :focus-within
+  ) {
+    [data-el-cell][data-setup] {
+      [data-el-info-box] {
+        @apply hidden;
+      }
+
+      /* Make the primary actions visible for all cells */
+      [data-el-actions][data-primary] {
+        @apply opacity-100;
+      }
+    }
+  }
+
+  /* Side panel */
+
+  &:not([data-js-side-panel-content]) [data-el-side-panel] {
+    @apply hidden;
+  }
+
+  &:not([data-js-side-panel-content="outline"]) [data-el-outline],
+  &:not([data-js-side-panel-content="clients-list"]) [data-el-clients-list],
+  &:not([data-js-side-panel-content="secrets-list"]) [data-el-secrets-list],
+  &:not([data-js-side-panel-content="files-list"]) [data-el-files-list],
+  &:not([data-js-side-panel-content="runtime-info"]) [data-el-runtime-info],
+  &:not([data-js-side-panel-content="app-info"]) [data-el-app-info] {
+    @apply hidden;
+  }
+
+  &[data-js-side-panel-content="outline"] [data-el-outline-toggle],
+  &[data-js-side-panel-content="clients-list"] [data-el-clients-list-toggle],
+  &[data-js-side-panel-content="secrets-list"] [data-el-secrets-list-toggle],
+  &[data-js-side-panel-content="files-list"] [data-el-files-list-toggle],
+  &[data-js-side-panel-content="runtime-info"] [data-el-runtime-info-toggle],
+  &[data-js-side-panel-content="app-info"] [data-el-app-info-toggle] {
+    @apply text-gray-50 bg-gray-700;
+  }
+
+  &[data-js-side-panel-content="runtime-info"] [data-el-runtime-indicator] {
+    @apply border-gray-700;
+  }
+
+  [data-el-clients-list-item]:not([data-js-followed]) [data-meta="unfollow"] {
+    @apply hidden;
+  }
+
+  [data-el-clients-list-item][data-js-followed] [data-meta="follow"] {
+    @apply hidden;
+  }
+
+  [data-el-outline-item][data-js-is-viewed] {
+    @apply text-gray-900;
+  }
+
+  /* Drag and drop */
+
+  &:not([data-js-dragging]) [data-el-insert-drop-area] {
+    @apply hidden;
+  }
+
+  &:not([data-js-dragging="external"]) [data-el-files-drop-area] {
+    @apply hidden;
+  }
+
+  &[data-js-dragging="external"] [data-el-files-add-button] {
+    @apply hidden;
+  }
+
+  /* Session views */
+
+  &[data-js-view="code-zen"] [data-el-view-toggle="code-zen"],
+  &[data-js-view="presentation"] [data-el-view-toggle="presentation"],
+  &[data-js-view="custom"] [data-el-view-toggle="custom"] {
+    @apply text-green-bright-400;
+  }
+
+  &[data-js-view] {
+    [data-el-actions],
+    [data-el-insert-buttons] {
+      @apply hidden;
+    }
+
+    [data-el-views-disabled] {
+      @apply hidden;
+    }
+  }
+
+  &:not([data-js-view]) [data-el-views-enabled] {
+    @apply hidden;
+  }
+
+  &[data-js-hide-output] {
+    [data-el-outputs-container] {
+      @apply hidden;
+    }
+  }
+
+  &[data-js-hide-section] {
+    [data-el-section-headline],
+    [data-el-section-subheadline],
+    [data-el-section-subheadline-collapsed] {
+      @apply hidden;
+    }
+
+    [data-el-sections-container] {
+      @apply gap-1 mt-1;
+    }
+  }
+
+  &[data-js-hide-markdown] {
+    [data-el-cell][data-type="markdown"] {
+      @apply hidden;
+    }
+  }
+
+  &[data-js-hide-code] {
+    [data-el-cell]:is([data-type="code"], [data-type="smart"]):not(
+        [data-js-insert-mode]
+      ) {
+      [data-el-editor-box],
+      &[data-setup] [data-el-info-box],
+      &[data-type="smart"] [data-el-ui-box] {
+        @apply hidden;
+      }
+
+      [data-el-cell-body-root]:after {
+        @apply flex py-2 px-3 border border-gray-200 rounded-lg text-sm text-gray-400 font-medium;
+        content: "Code";
+      }
+
+      [data-el-cell-indicator] {
+        @apply bg-gray-50 border-gray-200 text-gray-500;
+      }
+
+      &[data-type="smart"] [data-el-cell-indicators] {
+        @apply absolute bottom-2 right-2;
+      }
+    }
+  }
+
+  &[data-js-spotlight] {
+    [data-el-section-headline]:not([data-js-focused]),
+    [data-el-section-subheadline]:not([data-js-focused]),
+    [data-el-cell]:not([data-js-focused]),
+    [data-el-js-view-iframes] iframe:not([data-js-focused]) {
+      @apply opacity-10;
+    }
+
+    [data-el-sidebar],
+    [data-el-side-panel],
+    [data-el-toggle-sidebar] {
+      @apply hidden;
+    }
+  }
+}
+
+[data-el-notebook] {
+  /* Output size (both session and app) */
+
+  [data-output-size="default"][data-el-app-outputs-container] {
+    @apply w-full mx-auto;
+
+    max-width: var(--breakpoint-lg);
+  }
+
+  [data-output-size="wide"] {
+    &[data-el-app-outputs-container] {
+      @apply w-full mx-auto;
+
+      max-width: 90rem;
+    }
+
+    [data-el-outputs-container] {
+      @apply bg-white m-0 relative;
+
+      width: 90rem;
+      left: calc(-45rem + 50%);
+    }
+  }
+
+  [data-output-size="full"] {
+    &[data-el-app-outputs-container] {
+      @apply w-full mx-auto;
+
+      max-width: 92vw;
+    }
+
+    [data-el-outputs-container] {
+      @apply bg-white m-0 relative;
+
+      width: 92vw;
+      left: calc(-46vw + 50%);
+    }
+  }
+
+  /* Outputs (both session and app) */
+
+  [data-el-output][data-border] {
+    @apply p-4 border border-t-0 border-gray-200 divide-y divide-gray-200;
+  }
+
+  [data-el-output][data-border]:first-child {
+    @apply rounded-t-lg border-t;
+  }
+
+  [data-el-output]:not([data-border]) + [data-el-output][data-border] {
+    @apply border-t;
+  }
+
+  [data-el-output][data-border]:last-child {
+    @apply rounded-b-lg border-b;
+  }
+
+  [data-el-output]:not(:first-child) {
+    @apply mt-2;
+  }
+
+  [data-el-output][data-border] + [data-el-output][data-border] {
+    @apply mt-0;
+  }
+
+  [data-el-outputs-container] > [data-el-output]:first-child {
+    @apply mt-2;
+  }
+}

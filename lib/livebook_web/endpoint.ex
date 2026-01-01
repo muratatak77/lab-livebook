@@ -1,0 +1,176 @@
+defmodule LivebookWeb.Endpoint do
+  use Phoenix.Endpoint, otp_app: :livebook
+
+  # The session will be stored in the cookie and signed,
+  # this means its contents can be read but not tampered with.
+  # Set :encryption_salt if you would also like to encrypt it.
+  @session_options [
+    store: :cookie,
+    key: "lb_session",
+    signing_salt: "deadbook"
+  ]
+
+  # Don't check the origin as we don't know how the web app is gonna be accessed.
+  # It runs locally, but may be exposed via IP or domain name. The WebSocket
+  # connection is already protected from CSWSH by using CSRF token.
+  @websocket_options [
+    check_origin: false,
+    connect_info: [:user_agent, :uri, session: @session_options]
+  ]
+
+  socket "/live", Phoenix.LiveView.Socket, websocket: @websocket_options
+  socket "/socket", LivebookWeb.Socket, websocket: @websocket_options
+
+  # Serve static files at "/".
+  #
+  # In usual Phoenix applications, we serve static files from priv/static,
+  # however Livebook can also be run as escript, in which case it is
+  # packaged into a single file and priv/ is not accessible directly.
+  # In that case, we include priv/ in the escript archive by setting
+  # the :include_priv_for option. Then, on escript boot, we extract
+  # the priv files into a temporary directory.
+  #
+  # To account for both cases, we configure Plug.Static :from as MFA
+  # and return the accessible priv/ location in both scenarios.
+
+  plug Plug.Static,
+    at: "/",
+    from: {__MODULE__, :static_from, []},
+    # The static files are always gzipped.
+    gzip: true,
+    only: LivebookWeb.static_paths()
+
+  @doc false
+  def static_from(), do: Path.join(Livebook.Config.priv_path(), "static")
+
+  plug :force_ssl
+
+  if Code.ensure_loaded?(Tidewave) do
+    plug Tidewave
+  end
+
+  # Code reloading can be explicitly enabled under the
+  # :code_reloader configuration of your endpoint.
+  if code_reloading? do
+    socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
+    plug Phoenix.LiveReloader
+    plug Phoenix.CodeReloader
+  end
+
+  plug Phoenix.LiveDashboard.RequestLogger,
+    param_key: "request_logger",
+    cookie_key: "request_logger"
+
+  plug Plug.RequestId
+  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  plug LivebookWeb.ProxyPlug
+
+  plug Plug.Parsers,
+    parsers: [:urlencoded, :multipart, :json],
+    pass: ["*/*"],
+    json_decoder: Phoenix.json_library()
+
+  plug Plug.MethodOverride
+  plug Plug.Head
+  plug :session
+  plug :purge_cookies
+
+  # Run custom plugs from the app configuration
+  plug LivebookWeb.ConfiguredPlug
+
+  plug LivebookWeb.Router
+
+  @plug_session Plug.Session.init(@session_options ++ [same_site: "Lax"])
+  @plug_session_iframe Plug.Session.init(@session_options ++ [same_site: "None", secure: true])
+  def session(conn, _opts) do
+    if Livebook.Config.within_iframe?() do
+      Plug.Session.call(conn, @plug_session_iframe)
+    else
+      Plug.Session.call(conn, @plug_session)
+    end
+  end
+
+  # Avoid compile-time deps on config as it is invoked as a MFA.
+  @plug_ssl Plug.SSL.init(
+              host: {:"Elixir.Livebook.Config", :force_ssl_host, []},
+              rewrite_on: {:"Elixir.Livebook.Config", :rewrite_on, []}
+            )
+  def force_ssl(conn, _opts) do
+    if Livebook.Config.force_ssl_host() do
+      Plug.SSL.call(conn, @plug_ssl)
+    else
+      conn
+    end
+  end
+
+  def cookie_options() do
+    if Livebook.Config.within_iframe?() do
+      [same_site: "None", secure: true]
+    else
+      [same_site: "Lax"]
+    end
+  end
+
+  # Because we run on localhost, we may accumulate
+  # cookies from several other apps. Our header limit
+  # is set to 32kB. Once we are 75% of said limit,
+  # we clear other cookies to make sure we don't go
+  # over the limit.
+  def purge_cookies(conn, _opts) do
+    cookie_size =
+      conn
+      |> Plug.Conn.get_req_header("cookie")
+      |> Enum.map(&byte_size/1)
+      |> Enum.sum()
+
+    if cookie_size > 24576 do
+      conn.cookies
+      |> Enum.reject(fn {key, _value} -> String.starts_with?(key, "lb_") end)
+      |> Enum.take(10)
+      |> Enum.reduce(conn, fn {key, _value}, conn ->
+        Plug.Conn.delete_resp_cookie(conn, key)
+      end)
+    else
+      conn
+    end
+  end
+
+  def access_struct_url() do
+    base =
+      case struct_url() do
+        %URI{scheme: "https", port: 0} = uri ->
+          %{uri | port: port(:https, 433)}
+
+        %URI{scheme: "http", port: 0} = uri ->
+          %{uri | port: port(:http, 80)}
+
+        %URI{} = uri ->
+          uri
+      end
+
+    base = update_in(base.path, &(&1 || "/"))
+
+    case Livebook.Config.authentication() do
+      %{mode: :token, secret: token} ->
+        %{base | query: "token=" <> token}
+
+      _ ->
+        base
+    end
+  end
+
+  def access_url do
+    URI.to_string(access_struct_url())
+  end
+
+  defp port(scheme, default) do
+    try do
+      server_info(scheme)
+    rescue
+      _ -> default
+    else
+      {:ok, {_, port}} when is_integer(port) -> port
+      _ -> default
+    end
+  end
+end

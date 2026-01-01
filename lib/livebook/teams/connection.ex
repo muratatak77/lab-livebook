@@ -1,0 +1,172 @@
+defmodule Livebook.Teams.Connection do
+  @behaviour :gen_statem
+
+  require Logger
+
+  alias Livebook.Teams.WebSocket
+
+  @no_state :no_state
+  @loop_ping_delay 5_000
+
+  @expected_messages [:ssl, :tcp, :ssl_closed, :tcp_closed, :ssl_error, :tcp_error]
+
+  defstruct [:listener, :headers, :http_conn, :websocket, :ref]
+
+  @doc """
+  Starts a new WebSocket connection with given headers.
+  """
+  @spec start_link(pid(), Mint.Types.headers()) :: :gen_statem.start_ret()
+  def start_link(listener, headers \\ []) do
+    :gen_statem.start_link(__MODULE__, {listener, headers}, [])
+  end
+
+  def send_message(conn, message) do
+    :gen_statem.call(conn, {:message, message})
+  end
+
+  ## gen_statem callbacks
+
+  @impl true
+  def callback_mode(), do: :handle_event_function
+
+  @impl true
+  def init({listener, headers}) do
+    data = %__MODULE__{listener: listener, headers: headers}
+    {:ok, @no_state, data, {:next_event, :internal, :connect}}
+  end
+
+  @impl true
+  def handle_event(event_type, event_data, state, data)
+
+  def handle_event(:internal, :connect, @no_state, data) do
+    case WebSocket.connect(data.headers) do
+      {:ok, conn, websocket, ref} ->
+        send(data.listener, :connected)
+        send(self(), {:loop_ping, ref})
+        Logger.info("Teams WebSocket connection - established")
+        {:keep_state, %{data | http_conn: conn, ref: ref, websocket: websocket}}
+
+      {:transport_error, reason} ->
+        send(data.listener, {:connection_error, reason})
+        Logger.warning("Teams WebSocket connection - transport error: #{inspect(reason)}")
+
+        {:keep_state_and_data, {{:timeout, :backoff}, backoff_ms(), nil}}
+
+      {:server_error, 503, body} ->
+        reason = decode_error_reason(body)
+        send(data.listener, {:service_unavailable, reason})
+
+        Logger.warning(
+          "Teams WebSocket connection - server error - http status 503: #{inspect(reason)}"
+        )
+
+        {:keep_state_and_data, {{:timeout, :backoff}, backoff_ms(), nil}}
+
+      {:server_error, status, body} ->
+        reason = decode_error_reason(body)
+        send(data.listener, {:server_error, reason})
+
+        Logger.warning(
+          "Teams WebSocket connection - server error - http status #{status}: #{inspect(reason)}"
+        )
+
+        {:keep_state, data}
+    end
+  end
+
+  def handle_event({:timeout, :backoff}, nil, _state, _data) do
+    {:keep_state_and_data, {:next_event, :internal, :connect}}
+  end
+
+  def handle_event(:info, {:loop_ping, ref}, @no_state, %{ref: ref} = data) do
+    case WebSocket.send(data.http_conn, data.websocket, data.ref, :ping) do
+      {:ok, conn, websocket} ->
+        Process.send_after(self(), {:loop_ping, data.ref}, @loop_ping_delay)
+        {:keep_state, %{data | http_conn: conn, websocket: websocket}}
+
+      {:error, conn, websocket, reason} ->
+        data = %{data | http_conn: conn, websocket: websocket}
+        send(data.listener, {:connection_error, reason})
+        Logger.warning("Teams WebSocket connection - ping error: #{inspect(reason)}")
+        ensure_closed(data)
+        {:keep_state, data, {:next_event, :internal, :connect}}
+    end
+  end
+
+  def handle_event(:info, {:loop_ping, _another_ref}, @no_state, _data) do
+    :keep_state_and_data
+  end
+
+  def handle_event(:info, message, @no_state, %{http_conn: nil})
+      when elem(message, 0) in @expected_messages do
+    :keep_state_and_data
+  end
+
+  def handle_event(:info, message, @no_state, data) when elem(message, 0) in @expected_messages do
+    case WebSocket.receive(data.http_conn, data.ref, data.websocket, message) do
+      {:ok, conn, websocket, binaries} ->
+        data = %{data | http_conn: conn, websocket: websocket}
+        handle_messages(data, binaries)
+        {:keep_state, data}
+
+      {:closed, conn, websocket, binaries} ->
+        handle_messages(data, binaries)
+        data = %{data | http_conn: conn, websocket: websocket}
+        Logger.warning("Teams WebSocket connection - closed")
+        {:keep_state, data, {:next_event, :internal, :connect}}
+
+      {:error, conn, websocket, reason} ->
+        send(data.listener, {:connection_error, reason})
+        data = %{data | http_conn: conn, websocket: websocket}
+        Logger.warning("Teams WebSocket connection - receive error: #{inspect(reason)}")
+        ensure_closed(data)
+        {:keep_state, data, {:next_event, :internal, :connect}}
+    end
+  end
+
+  def handle_event(:info, _message, @no_state, _data) do
+    :keep_state_and_data
+  end
+
+  def handle_event({:call, from}, {:message, message}, @no_state, data) do
+    case WebSocket.send(data.http_conn, data.websocket, data.ref, {:binary, message}) do
+      {:ok, conn, websocket} ->
+        :gen_statem.reply(from, :ok)
+        {:keep_state, %{data | http_conn: conn, websocket: websocket}}
+
+      {:error, conn, websocket, reason} ->
+        data = %{data | http_conn: conn, websocket: websocket}
+        send(data.listener, {:connection_error, reason})
+        :gen_statem.reply(from, {:error, reason})
+        Logger.warning("Teams WebSocket connection - send error: #{inspect(reason)}")
+        ensure_closed(data)
+        {:keep_state, data, {:next_event, :internal, :connect}}
+    end
+  end
+
+  # Private
+
+  defp handle_messages(data, binaries) do
+    for binary <- binaries do
+      %{type: {topic, message}} = LivebookProto.Event.decode(binary)
+      send(data.listener, {:event, topic, message})
+    end
+  end
+
+  defp ensure_closed(data) do
+    _ = WebSocket.disconnect(data.http_conn, data.websocket, data.ref)
+  end
+
+  defp decode_error_reason(body) do
+    LivebookProto.Error.decode(body).details
+  rescue
+    error in Protobuf.DecodeError ->
+      "Server error (unexpected response format), error: #{Exception.message(error)}"
+  end
+
+  defp backoff_ms do
+    # Random between 3 and 10 seconds
+    range = Application.get_env(:livebook, :teams_connection_backoff_range_ms, 3_000..10_000)
+    Enum.random(range)
+  end
+end

@@ -1,0 +1,25 @@
+defmodule LivebookProto.AgentConnected do
+  use Protobuf, full_name: "AgentConnected", protoc_gen_elixir_version: "0.16.0", syntax: :proto3
+
+  field :name, 2, type: :string
+  field :public_key, 3, type: :string, json_name: "publicKey"
+  field :deployment_group_id, 4, type: :int32, json_name: "deploymentGroupId"
+  field :secrets, 5, repeated: true, type: LivebookProto.Secret
+  field :file_systems, 6, repeated: true, type: LivebookProto.FileSystem, json_name: "fileSystems"
+
+  field :deployment_groups, 7,
+    repeated: true,
+    type: LivebookProto.DeploymentGroup,
+    json_name: "deploymentGroups"
+
+  field :app_deployments, 8,
+    repeated: true,
+    type: LivebookProto.AppDeployment,
+    json_name: "appDeployments"
+
+  field :agents, 9, repeated: true, type: LivebookProto.Agent
+  field :billing_status, 10, type: LivebookProto.BillingStatus, json_name: "billingStatus"
+  field :app_folders, 11, repeated: true, type: LivebookProto.AppFolder, json_name: "appFolders"
+  field :notifications, 12, repeated: true, type: LivebookProto.Notification
+  field :min_version_enforcement, 13, type: :string, json_name: "minVersionEnforcement"
+end
