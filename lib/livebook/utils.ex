@@ -878,7 +878,7 @@ defmodule Livebook.Utils do
 
   defp format_bytes(bytes, unit) when is_integer(bytes) do
     value = bytes / memory_unit(unit)
-    "#{:erlang.float_to_binary(value, decimals: 1)} #{unit}"
+    "#{:erlang.float_to_binary(value, decimals: 2)} #{unit}"
   end
 
   defp memory_unit(:TB), do: 1024 * 1024 * 1024 * 1024
