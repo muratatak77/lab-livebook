@@ -851,16 +851,16 @@ defmodule Livebook.Utils do
       "900 B"
 
       iex> Livebook.Utils.format_bytes(1100)
-      "1.1 KB"
+      "1.07 KB"
 
       iex> Livebook.Utils.format_bytes(1_228_800)
-      "1.2 MB"
+      "1.17 MB"
 
       iex> Livebook.Utils.format_bytes(1_363_148_800)
-      "1.3 GB"
+      "1.27 GB"
 
       iex> Livebook.Utils.format_bytes(1_503_238_553_600)
-      "1.4 TB"
+      "1.37 TB"
 
   """
   @spec format_bytes(non_neg_integer()) :: String.t()
