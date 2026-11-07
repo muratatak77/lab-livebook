@@ -109,9 +109,9 @@ defmodule Livebook.SettingsTest do
       assert {:error, changeset} = Settings.create_dev_access_token(%{name: ""})
       assert "can't be blank" in errors_on(changeset).name
 
-      long_name = String.duplicate("a", 65)
+      long_name = String.duplicate("a", 33)
       assert {:error, changeset} = Settings.create_dev_access_token(%{name: long_name})
-      assert "should be at most 64 character(s)" in errors_on(changeset).name
+      assert "should be at most 32 character(s)" in errors_on(changeset).name
 
       {:ok, _, _} = Settings.create_dev_access_token(%{name: "CLI"})
       assert {:error, changeset} = Settings.create_dev_access_token(%{name: "cli"})
