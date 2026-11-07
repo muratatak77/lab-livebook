@@ -79,6 +79,19 @@ defmodule Livebook.StorageTest do
     assert :error = Storage.fetch(:fetch, "unknown")
   end
 
+  test "update/3" do
+    assert :error = Storage.update(:update, "test", key1: "val1")
+    assert :error = Storage.fetch(:update, "test")
+
+    :ok = Storage.insert(:update, "test", key1: "val1", key2: "val2")
+    assert :ok = Storage.update(:update, "test", key1: "updated")
+    assert {:ok, %{key1: "updated", key2: "val2"}} = Storage.fetch(:update, "test")
+
+    :ok = Storage.delete(:update, "test")
+    assert :error = Storage.update(:update, "test", key1: "val1")
+    assert :error = Storage.fetch(:update, "test")
+  end
+
   test "delete/2" do
     :ok = Storage.insert(:delete, "test", key1: "val1")
 

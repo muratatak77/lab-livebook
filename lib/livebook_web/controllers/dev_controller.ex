@@ -5,6 +5,7 @@ defmodule LivebookWeb.DevController do
 
   plug :disallow_browser
   plug :require_enabled
+  plug :require_access_token
 
   def sync(conn, %{"file" => path}) when is_binary(path) do
     file = Livebook.FileSystem.File.local(path)
@@ -107,5 +108,43 @@ defmodule LivebookWeb.DevController do
       })
       |> halt()
     end
+  end
+
+  defp require_access_token(conn, _opts) do
+    if Livebook.Settings.dev_access_tokens_required?() do
+      case fetch_bearer_token(conn) do
+        {:ok, token} ->
+          case Livebook.Settings.verify_dev_access_token(token) do
+            {:ok, _token} -> conn
+            :error -> unauthorized(conn, "Invalid access token")
+          end
+
+        :error ->
+          unauthorized(
+            conn,
+            "Missing access token, pass it in the authorization header as Bearer <token>"
+          )
+      end
+    else
+      conn
+    end
+  end
+
+  defp fetch_bearer_token(conn) do
+    with [value] <- get_req_header(conn, "authorization"),
+         [scheme, token] <- String.split(value, " ", parts: 2, trim: true),
+         "bearer" <- String.downcase(scheme) do
+      {:ok, String.trim(token)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp unauthorized(conn, message) do
+    conn
+    |> put_resp_header("www-authenticate", ~s/Bearer realm="livebook"/)
+    |> put_status(401)
+    |> json(%{status: "error", message: message})
+    |> halt()
   end
 end

@@ -84,6 +84,7 @@ defmodule LivebookWeb.Router do
       live "/settings/add-file-system", SettingsLive, :add_file_system
       live "/settings/env-var/new", SettingsLive, :add_env_var
       live "/settings/env-var/edit/:env_var_id", SettingsLive, :edit_env_var
+      live "/settings/dev-access-token/new", SettingsLive, :add_dev_access_token
 
       live "/learn", LearnLive, :page
       live "/learn/notebooks/:slug", LearnLive, :notebook
