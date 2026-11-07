@@ -1,5 +1,7 @@
 defmodule LivebookWeb.DevControllerTest do
-  use LivebookWeb.ConnCase, async: true
+  # Dev endpoints settings and access tokens are global, so we don't
+  # want them to change while other tests run
+  use LivebookWeb.ConnCase, async: false
 
   alias Livebook.{Sessions, Session, FileSystem}
 
@@ -29,6 +31,84 @@ defmodule LivebookWeb.DevControllerTest do
              "status" => "error",
              "message" => "Dev endpoints are disabled, you can enable them in the settings"
            }
+  end
+
+  describe "access tokens" do
+    setup do
+      {token, plain_token} = insert_dev_access_token()
+      on_exit(fn -> Livebook.Settings.delete_dev_access_token(token.id) end)
+      %{token: token, plain_token: plain_token}
+    end
+
+    test "rejects requests without a token", %{conn: conn} do
+      conn = post(conn, ~p"/dev/sync", %{file: "/some/path"})
+
+      assert json_response(conn, 401) == %{
+               "status" => "error",
+               "message" =>
+                 "Missing access token, pass it in the authorization header as Bearer <token>"
+             }
+
+      assert get_resp_header(conn, "www-authenticate") == [~s/Bearer realm="livebook"/]
+    end
+
+    test "rejects requests with an invalid token", %{conn: conn, token: token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token.token_hash}")
+        |> post(~p"/dev/sync", %{file: "/some/path"})
+
+      assert json_response(conn, 401) == %{
+               "status" => "error",
+               "message" => "Invalid access token"
+             }
+    end
+
+    test "rejects requests using a different authorization scheme",
+         %{conn: conn, plain_token: plain_token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Basic #{plain_token}")
+        |> post(~p"/dev/sync", %{file: "/some/path"})
+
+      assert json_response(conn, 401)["message"] =~ "Missing access token"
+    end
+
+    test "accepts requests with a valid token and records usage",
+         %{conn: conn, token: token, plain_token: plain_token} do
+      conn =
+        conn
+        |> put_req_header("authorization", "bearer #{plain_token}")
+        |> post(~p"/dev/sync", %{file: "/some/path"})
+
+      # The request goes through and fails only because there is no session
+      assert json_response(conn, 404) == %{
+               "status" => "error",
+               "message" => "No session found for the given file"
+             }
+
+      assert [%{id: id, last_used_at: %DateTime{}}] = Livebook.Settings.fetch_dev_access_tokens()
+      assert id == token.id
+    end
+
+    test "stops requiring a token once all tokens are revoked", %{conn: conn, token: token} do
+      Livebook.Settings.delete_dev_access_token(token.id)
+
+      conn = post(conn, ~p"/dev/sync", %{file: "/some/path"})
+
+      assert json_response(conn, 404)["message"] == "No session found for the given file"
+    end
+
+    test "checks the origin before the token", %{conn: conn, plain_token: plain_token} do
+      conn =
+        conn
+        |> put_req_header("origin", "http://localhost:4000")
+        |> put_req_header("authorization", "Bearer #{plain_token}")
+        |> post(~p"/dev/sync", %{file: "/some/path"})
+
+      assert json_response(conn, 403)["message"] ==
+               "This endpoint is not available in the browser"
+    end
   end
 
   describe "sync" do

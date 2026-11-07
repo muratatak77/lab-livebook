@@ -208,6 +208,12 @@ defmodule Livebook.Factory do
     env_var
   end
 
+  def insert_dev_access_token(attrs \\ %{}) do
+    attrs = Map.new(attrs) |> Map.put_new_lazy(:name, fn -> unique_value("Token ") end)
+    {:ok, token, plain_token} = Livebook.Settings.create_dev_access_token(attrs)
+    {token, plain_token}
+  end
+
   # Creates an online hub with offline connection, which is safe to
   # used in tests without hubs server.
   def insert_fake_online_hub() do

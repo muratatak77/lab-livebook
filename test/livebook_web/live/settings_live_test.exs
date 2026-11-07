@@ -86,6 +86,99 @@ defmodule LivebookWeb.SettingsLiveTest do
     end
   end
 
+  describe "dev access tokens" do
+    setup do
+      Settings.set_dev_endpoints_enabled(true)
+
+      on_exit(fn ->
+        Settings.set_dev_endpoints_enabled(false)
+
+        for token <- Settings.fetch_dev_access_tokens() do
+          Settings.delete_dev_access_token(token.id)
+        end
+      end)
+    end
+
+    test "are only configurable when dev endpoints are enabled", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+      assert has_element?(view, "#add-dev-access-token")
+
+      view
+      |> element(~s{form[phx-change="save"]}, "Control Livebook via local HTTP endpoints")
+      |> render_change(%{"dev_endpoints_enabled" => "false"})
+
+      refute has_element?(view, "#add-dev-access-token")
+    end
+
+    test "creates an access token and reveals it once", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/dev-access-token/new")
+
+      assert html =~ "Create access token"
+
+      assert view
+             |> element("#dev-access-token-form")
+             |> render_change(%{"dev_access_token" => %{"name" => ""}}) =~ "can&#39;t be blank"
+
+      view
+      |> element("#dev-access-token-form")
+      |> render_submit(%{"dev_access_token" => %{"name" => "Neovim"}})
+
+      assert [token] = Settings.fetch_dev_access_tokens()
+      assert token.name == "Neovim"
+
+      plain_token =
+        view
+        |> element("#dev-access-token-value")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert {:ok, _} = Settings.verify_dev_access_token(plain_token)
+      assert render(view) =~ "authorization: Bearer #{plain_token}"
+
+      view
+      |> element("#dev-access-token-created a", "Done")
+      |> render_click()
+
+      assert_patch(view, ~p"/settings")
+
+      html = view |> element("#dev-access-tokens") |> render()
+      assert html =~ "Neovim"
+      assert html =~ Settings.DevAccessToken.masked(token)
+      refute html =~ plain_token
+    end
+
+    test "shows an error when the name is already taken", %{conn: conn} do
+      insert_dev_access_token(name: "Zed")
+
+      {:ok, view, _html} = live(conn, ~p"/settings/dev-access-token/new")
+
+      assert view
+             |> element("#dev-access-token-form")
+             |> render_submit(%{"dev_access_token" => %{"name" => "Zed"}}) =~
+               "has already been taken"
+
+      assert [_] = Settings.fetch_dev_access_tokens()
+    end
+
+    test "revokes an access token", %{conn: conn} do
+      {token, _} = insert_dev_access_token(name: "Emacs")
+
+      {:ok, view, html} = live(conn, ~p"/settings")
+      assert html =~ "Emacs"
+
+      view
+      |> element("#dev-access-token-#{token.id}-delete")
+      |> render_click()
+
+      render_confirm(view)
+
+      assert Settings.fetch_dev_access_tokens() == []
+      refute view |> element("#dev-access-tokens") |> render() =~ "Emacs"
+    end
+  end
+
   describe "autosaving" do
     # Autosaving can only be disabled by directly changing storage,
     # which we do for tests. That said, it is a valid setting, so we

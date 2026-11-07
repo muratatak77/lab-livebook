@@ -10,7 +10,22 @@ Dev endpoints are disabled by default. To enable them, go to **Settings → Dev 
 
 The endpoints are meant to be accessible programmatically and reject any request that includes the `Origin` header (which browsers automatically attach), preventing cross-site access from web pages.
 
-Furthermore, the Livebook CLI and the Desktop app bind to localhost by default, meaning Livebook and these routes are only available locally. However, beware! If you expose the Livebook application to the network and enable these endpoints at the same time, then they will become publicly available.
+Furthermore, the Livebook CLI and the Desktop app bind to localhost by default, meaning Livebook and these routes are only available locally. However, beware! If you expose the Livebook application to the network and enable these endpoints at the same time, then they will become publicly available. In such cases, make sure to create an access token, as described below.
+
+Note that dev endpoints are not covered by [instance authentication](authentication.md), so configuring an identity provider does not protect them.
+
+### Access tokens
+
+Once dev endpoints are enabled, you can create access tokens under **Settings → Dev endpoints → Access tokens**. As soon as at least one token exists, every request to the dev endpoints must include a valid token in the `authorization` header:
+
+```shell
+curl -X POST http://localhost:32123/dev/sync \
+  -H "authorization: Bearer lb_dev_..." \
+  -H "content-type: application/json" \
+  -d '{"file": "/absolute/path/to/notebook.livemd"}'
+```
+
+Requests without a token, or with an unknown one, are rejected with status `401`. The token is shown only once, right after it is created, since Livebook stores just its SHA-256 digest. We recommend creating a separate token for each tool, so you can revoke them individually. Revoking all tokens makes the endpoints accept unauthenticated local requests again.
 
 ## Endpoints
 
@@ -19,6 +34,8 @@ All endpoints accept and return JSON. On error, the response body is:
 ```json
 { "status": "error", "message": "..." }
 ```
+
+All endpoints respond with `403` when dev endpoints are disabled and with `401` when access tokens are configured, but the request does not include a valid one.
 
 ### POST /dev/sync
 
@@ -100,6 +117,8 @@ For example, to watch all notebooks in the current directory using `fswatch`, yo
 fswatch *.livemd | xargs -I{} curl -X POST http://localhost:32123/dev/sync -H 'content-type: application/json' -d '{"file":"{}"}'
 ```
 
+If you configured an access token, also pass `-H "authorization: Bearer $LIVEBOOK_DEV_TOKEN"`.
+
 ### Coding agent hooks
 
 If you are editing notebooks using coding agents, you can add hooks to automatically synchronize file changes into the corresponding session open in Livebook. Below we will see an example for Claude Code on Unix systems, but it can be adapted to other agents and environments:
@@ -141,6 +160,8 @@ If you are editing notebooks using coding agents, you can add hooks to automatic
 #!/bin/bash
 
 livebook_url="http://localhost:32123"
+# Only required when access tokens are configured
+livebook_token="${LIVEBOOK_DEV_TOKEN:-}"
 
 file_path=$(jq -r '.tool_input.file_path // empty')
 
@@ -149,8 +170,11 @@ file_path=$(jq -r '.tool_input.file_path // empty')
 call_endpoint() {
   local endpoint="$1"
   local error
+  local auth_header=()
+  [[ -n "$livebook_token" ]] && auth_header=(-H "Authorization: Bearer $livebook_token")
   error=$(curl -sfS -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
+    "${auth_header[@]}" \
     -d "{\"file\": \"$file_path\"}" 2>&1)
   if [[ $? -ne 0 ]]; then
     jq -n --arg msg "Livebook hook error: $error" '{systemMessage: $msg}'
@@ -186,6 +210,12 @@ Mix.install([
 
 livebook_url = System.get_env("LIVEBOOK_URL", "http://localhost:32123")
 
+auth_headers =
+  case System.get_env("LIVEBOOK_DEV_TOKEN") do
+    nil -> []
+    token -> [authorization: "Bearer #{token}"]
+  end
+
 {output, 0} = System.cmd("git", ["diff", "--name-only", "--diff-filter=M", "HEAD"])
 paths =  String.split(output, "\n", trim: true)
 
@@ -195,7 +225,8 @@ for path <- paths, Path.extname(path) == ".livemd" do
 
   %{status: 200, body: %{"source" => restamped_source}} =
     Req.post!("#{livebook_url}/dev/restamp",
-      json: %{old_source: old_source, new_source: new_source}
+      json: %{old_source: old_source, new_source: new_source},
+      headers: auth_headers
     )
 
   if restamped_source != new_source do

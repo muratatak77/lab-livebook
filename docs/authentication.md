@@ -27,3 +27,7 @@ Livebook's default admin authentication method is token authentication. A token 
 You may optionally enable password-based authentication by setting the environment variable `LIVEBOOK_PASSWORD` on startup or deployment. It must be at least 12 characters.
 
 To disable admin authentication, you may set the environment variable `LIVEBOOK_TOKEN_ENABLED` to `false`.
+
+## Dev endpoints
+
+The [dev endpoints](dev_endpoints.md) under `/dev` are meant for local tooling and are not covered by instance or admin authentication. They are disabled by default. If you enable them on an instance that is reachable from the network, create an access token in **Settings → Dev endpoints**, so that only requests carrying the token are accepted.
