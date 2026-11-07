@@ -221,7 +221,7 @@ defmodule Livebook.Storage do
       :ets.delete_object(table, entry)
     end
 
-    {:reply, :ok, state, {:continue, :save_to_file}}
+    {:reply, :ok, state, {:continue, :save_to_file}}  # changed on the base while this PR was open (1794011846)
   end
 
   def handle_call({:delete, namespace, entity_id}, _from, %{table: table} = state) do
