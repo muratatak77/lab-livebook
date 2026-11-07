@@ -113,10 +113,7 @@ defmodule Livebook.Settings do
   @spec create_dev_access_token(map()) ::
           {:ok, DevAccessToken.t(), String.t()} | {:error, Ecto.Changeset.t()}
   def create_dev_access_token(attrs) do
-    changeset =
-      %DevAccessToken{}
-      |> DevAccessToken.changeset(attrs)
-      |> validate_dev_access_token_name_unique()
+    changeset = change_dev_access_token(%DevAccessToken{}, attrs)
 
     with {:ok, token} <- apply_action(changeset, :insert) do
       plain_token = DevAccessToken.generate()
@@ -150,10 +147,15 @@ defmodule Livebook.Settings do
 
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking access token changes.
+
+  Includes the name uniqueness check, so forms can report a taken
+  name before submitting.
   """
   @spec change_dev_access_token(DevAccessToken.t(), map()) :: Ecto.Changeset.t()
   def change_dev_access_token(%DevAccessToken{} = token, attrs \\ %{}) do
-    DevAccessToken.changeset(token, attrs)
+    token
+    |> DevAccessToken.changeset(attrs)
+    |> validate_dev_access_token_name_unique()
   end
 
   @doc """
@@ -190,7 +192,7 @@ defmodule Livebook.Settings do
       end)
 
     if token do
-      {:ok, touch_dev_access_token(token)}
+      touch_dev_access_token(token)
     else
       :error
     end
@@ -201,12 +203,19 @@ defmodule Livebook.Settings do
 
     if token.last_used_at == nil or
          DateTime.diff(now, token.last_used_at) >= @last_used_at_resolution_s do
-      token = %{token | last_used_at: now}
-      :ok = Storage.insert(:dev_access_tokens, token.id, last_used_at: now)
-      broadcast_settings_change({:dev_access_token_used, token})
-      token
+      # The token may have been revoked since we read it, in which case
+      # we must not recreate it
+      case Storage.update(:dev_access_tokens, token.id, last_used_at: now) do
+        :ok ->
+          token = %{token | last_used_at: now}
+          broadcast_settings_change({:dev_access_token_used, token})
+          {:ok, token}
+
+        :error ->
+          :error
+      end
     else
-      token
+      {:ok, token}
     end
   end
 

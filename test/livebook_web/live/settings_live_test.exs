@@ -156,6 +156,13 @@ defmodule LivebookWeb.SettingsLiveTest do
 
       assert view
              |> element("#dev-access-token-form")
+             |> render_change(%{"dev_access_token" => %{"name" => "zed"}}) =~
+               "has already been taken"
+
+      assert has_element?(view, "#dev-access-token-form button[type=submit][disabled]")
+
+      assert view
+             |> element("#dev-access-token-form")
              |> render_submit(%{"dev_access_token" => %{"name" => "Zed"}}) =~
                "has already been taken"
 

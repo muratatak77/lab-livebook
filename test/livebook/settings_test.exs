@@ -146,6 +146,17 @@ defmodule Livebook.SettingsTest do
       assert DateTime.after?(last_used_at, long_ago)
     end
 
+    test "change_dev_access_token/2 validates name uniqueness" do
+      {:ok, _, _} = Settings.create_dev_access_token(%{name: "CLI"})
+
+      changeset = Settings.change_dev_access_token(%Settings.DevAccessToken{}, %{name: "cli"})
+      refute changeset.valid?
+      assert "has already been taken" in errors_on(changeset).name
+
+      refute Settings.change_dev_access_token(%Settings.DevAccessToken{}).valid?
+      assert Settings.change_dev_access_token(%Settings.DevAccessToken{}, %{name: "Other"}).valid?
+    end
+
     test "delete_dev_access_token/1 revokes the token and notifies subscribers" do
       Settings.subscribe()
 
