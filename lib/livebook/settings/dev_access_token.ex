@@ -36,7 +36,7 @@ defmodule Livebook.Settings.DevAccessToken do
     |> cast(attrs, [:name])
     |> update_change(:name, &String.trim/1)
     |> validate_required([:name])
-    |> validate_length(:name, max: 64)
+    |> validate_length(:name, max: 32)
   end
 
   @doc """
