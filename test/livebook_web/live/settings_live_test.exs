@@ -135,7 +135,13 @@ defmodule LivebookWeb.SettingsLiveTest do
         |> String.trim()
 
       assert {:ok, _} = Settings.verify_dev_access_token(plain_token)
-      assert render(view) =~ "authorization: Bearer #{plain_token}"
+      html = render(view)
+      assert html =~ "authorization: Bearer #{plain_token}"
+
+      # The example uses the bound address, without the access token query
+      base_url = %{LivebookWeb.Endpoint.access_struct_url() | path: nil, query: nil}
+      assert html =~ "curl -X POST #{base_url}/dev/open "
+      refute html =~ "/dev/open?token="
 
       view
       |> element("#dev-access-token-created a", "Done")

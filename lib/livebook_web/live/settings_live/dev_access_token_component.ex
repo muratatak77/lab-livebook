@@ -106,8 +106,12 @@ defmodule LivebookWeb.SettingsLive.DevAccessTokenComponent do
   end
 
   defp example_request(plain_token) do
+    # access_struct_url/0 resolves port 0 to the bound port, unlike url/0.
+    # Drop its auth token query, the request authenticates with the bearer token.
+    url = %{LivebookWeb.Endpoint.access_struct_url() | path: ~p"/dev/open", query: nil}
+
     """
-    curl -X POST #{LivebookWeb.Endpoint.url()}#{~p"/dev/open"} \\
+    curl -X POST #{url} \\
       -H "authorization: Bearer #{plain_token}" \\
       -H "content-type: application/json" \\
       -d '{"file": "/path/to/notebook.livemd"}'\

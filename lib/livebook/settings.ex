@@ -275,7 +275,7 @@ defmodule Livebook.Settings do
   defp save_env_var(env_var) do
     attributes = env_var |> Map.from_struct() |> Map.to_list()
     :ok = Storage.insert(:env_vars, env_var.name, attributes)
-    :ok = broadcast_env_vars_change({:env_var_set, env_var})
+    :ok = broadcast_settings_change({:env_var_set, env_var})
     env_var
   end
 
@@ -290,7 +290,7 @@ defmodule Livebook.Settings do
     if env_var_exists?(id) do
       env_var = fetch_env_var!(id)
       Storage.delete(:env_vars, id)
-      broadcast_env_vars_change({:env_var_unset, env_var})
+      broadcast_settings_change({:env_var_unset, env_var})
     end
 
     :ok
@@ -329,13 +329,9 @@ defmodule Livebook.Settings do
     Phoenix.PubSub.unsubscribe(Livebook.PubSub, "settings")
   end
 
-  # Notifies interested processes about environment variables data change.
+  # Notifies interested processes about settings data change.
   #
   # Broadcasts given message under the `"settings"` topic.
-  defp broadcast_env_vars_change(message) do
-    broadcast_settings_change(message)
-  end
-
   defp broadcast_settings_change(message) do
     Phoenix.PubSub.broadcast(Livebook.PubSub, "settings", message)
   end
