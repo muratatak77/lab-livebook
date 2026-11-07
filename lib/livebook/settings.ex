@@ -127,6 +127,7 @@ defmodule Livebook.Settings do
   defp save_env_var(env_var) do
     attributes = env_var |> Map.from_struct() |> Map.to_list()
     :ok = Storage.insert(:env_vars, env_var.name, attributes)
+    # changed on the base while this PR was open (1794075046)
     :ok = broadcast_env_vars_change({:env_var_set, env_var})
     env_var
   end
