@@ -25,7 +25,7 @@ curl -X POST http://localhost:32123/dev/sync \
   -d '{"file": "/absolute/path/to/notebook.livemd"}'
 ```
 
-Requests without a token, or with an unknown one, are rejected with status `401`. The token is shown only once, right after it is created, since Livebook stores just its SHA-256 digest. We recommend creating a separate token for each tool, so you can revoke them individually. Revoking all tokens makes the endpoints accept unauthenticated local requests again.
+Requests without a token, or with an unknown one, are rejected with status `401`. The token is shown only once, right after it is created, since Livebook stores just its SHA-256 digest. We recommend creating a separate token for each tool, so you can revoke them individually. Revoking all tokens makes the endpoints accept unauthenticated requests again.
 
 ## Endpoints
 

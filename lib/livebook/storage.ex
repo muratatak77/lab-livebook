@@ -133,8 +133,8 @@ defmodule Livebook.Storage do
   Same as `insert/3`, but only if the entity already exists.
 
   The existence check and the write happen atomically, so an entity
-  deleted concurrently is never recreated. Returns `:error` if the
-  entity does not exist.
+  deleted concurrently is never recreated. Returns `:ok` on success,
+  `:error` if the entity does not exist.
   """
   @spec update(namespace(), entity_id(), [{attribute(), value()}]) :: :ok | :error
   def update(namespace, entity_id, attributes) do

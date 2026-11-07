@@ -8,7 +8,7 @@ defmodule LivebookWeb.SettingsLive.DevAccessTokensComponent do
     ~H"""
     <div id={@id} class="flex flex-col space-y-4">
       <.no_entries :if={@tokens == []}>
-        No access tokens yet. Dev endpoints accept any local request until you create one.
+        No access tokens yet. Dev endpoints accept any request until you create one.
       </.no_entries>
       <div :if={@tokens != []}>
         <.table id="dev-access-tokens-table" rows={@tokens}>

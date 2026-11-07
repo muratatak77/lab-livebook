@@ -106,9 +106,11 @@ defmodule Livebook.Settings do
   @doc """
   Creates a new dev endpoint access token.
 
-  On success, returns the stored token together with the plain token
-  value. The plain value is not persisted, so this is the only time
-  it is available.
+  On success, returns `{:ok, token, plain_token}`, the stored token
+  together with the plain token value. The plain value is not
+  persisted, so this is the only time it is available. Returns
+  `{:error, changeset}` if the attributes are invalid, for example
+  when the name is already taken.
   """
   @spec create_dev_access_token(map()) ::
           {:ok, DevAccessToken.t(), String.t()} | {:error, Ecto.Changeset.t()}
@@ -161,7 +163,7 @@ defmodule Livebook.Settings do
   @doc """
   Revokes the dev endpoint access token with the given id.
 
-  Does nothing if the token does not exist.
+  Always returns `:ok`, and does nothing if the token does not exist.
   """
   @spec delete_dev_access_token(String.t()) :: :ok
   def delete_dev_access_token(id) do
@@ -180,7 +182,9 @@ defmodule Livebook.Settings do
   @doc """
   Looks up the access token matching the given plain token.
 
-  On success, the token usage time is recorded.
+  Returns `{:ok, token}` if a stored token matches, recording its
+  usage time. Returns `:error` if no token matches, or if the matching
+  token is revoked while it is being verified.
   """
   @spec verify_dev_access_token(String.t()) :: {:ok, DevAccessToken.t()} | :error
   def verify_dev_access_token(plain_token) when is_binary(plain_token) do

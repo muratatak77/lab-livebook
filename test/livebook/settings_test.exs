@@ -146,6 +146,38 @@ defmodule Livebook.SettingsTest do
       assert DateTime.after?(last_used_at, long_ago)
     end
 
+    test "verify_dev_access_token/1 does not recreate a token revoked while verifying" do
+      {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: "CLI"})
+      storage = Process.whereis(Livebook.Storage)
+
+      # Hold the Storage process, so the verification reads the token
+      # and then blocks on the usage write
+      :sys.suspend(storage)
+
+      task = Task.async(fn -> Settings.verify_dev_access_token(plain_token) end)
+
+      wait_until(fn ->
+        {:messages, messages} = Process.info(storage, :messages)
+
+        Enum.any?(
+          messages,
+          &match?({:"$gen_call", {pid, _}, {:update, _, _, _}} when pid == task.pid, &1)
+        )
+      end)
+
+      # Revoke the token before the queued write is processed
+      :sys.replace_state(storage, fn %{table: table} = state ->
+        :ets.match_delete(table, {{:dev_access_tokens, token.id}, :_, :_, :_})
+        state
+      end)
+
+      :sys.resume(storage)
+
+      assert :error = Task.await(task)
+      assert :error = Livebook.Storage.fetch(:dev_access_tokens, token.id)
+      refute Settings.dev_access_tokens_required?()
+    end
+
     test "change_dev_access_token/2 validates name uniqueness" do
       {:ok, _, _} = Settings.create_dev_access_token(%{name: "CLI"})
 
@@ -173,6 +205,20 @@ defmodule Livebook.SettingsTest do
       # Deleting a missing token is a no-op
       assert :ok = Settings.delete_dev_access_token(token.id)
       refute_receive {:dev_access_token_deleted, _}
+    end
+  end
+
+  defp wait_until(fun, attempts \\ 100) do
+    cond do
+      fun.() ->
+        :ok
+
+      attempts == 0 ->
+        flunk("condition not met in time")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
     end
   end
 end
