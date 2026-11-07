@@ -290,3 +290,5 @@ defmodule Livebook.Storage do
     {match_head, [guard], [result]}
   end
 end
+
+# Lab note.
