@@ -130,6 +130,18 @@ defmodule Livebook.Storage do
   end
 
   @doc """
+  Same as `insert/3`, but only if the entity already exists.
+
+  The existence check and the write happen atomically, so an entity
+  deleted concurrently is never recreated. Returns `:ok` on success,
+  `:error` if the entity does not exist.
+  """
+  @spec update(namespace(), entity_id(), [{attribute(), value()}]) :: :ok | :error
+  def update(namespace, entity_id, attributes) do
+    GenServer.call(__MODULE__, {:update, namespace, entity_id, attributes})
+  end
+
+  @doc """
   Deletes an entity of given id from given namespace.
   """
   @spec delete(namespace(), entity_id()) :: :ok
@@ -200,6 +212,30 @@ defmodule Livebook.Storage do
 
   @impl true
   def handle_call({:insert, namespace, entity_id, attributes}, _from, %{table: table} = state) do
+    do_insert(table, namespace, entity_id, attributes)
+    {:reply, :ok, state, {:continue, :save_to_file}}
+  end
+
+  def handle_call({:update, namespace, entity_id, attributes}, _from, %{table: table} = state) do
+    if :ets.member(table, {namespace, entity_id}) do
+      do_insert(table, namespace, entity_id, attributes)
+      {:reply, :ok, state, {:continue, :save_to_file}}
+    else
+      {:reply, :error, state}
+    end
+  end
+
+  def handle_call({:delete, namespace, entity_id}, _from, %{table: table} = state) do
+    :ets.delete(table, {namespace, entity_id})
+    {:reply, :ok, state, {:continue, :save_to_file}}
+  end
+
+  def handle_call({:delete_key, namespace, entity_id, key}, _from, %{table: table} = state) do
+    delete_keys(table, namespace, entity_id, [key])
+    {:reply, :ok, state, {:continue, :save_to_file}}
+  end
+
+  defp do_insert(table, namespace, entity_id, attributes) do
     keys = Enum.map(attributes, fn {key, _val} -> key end)
     old_entries = select_keys(table, namespace, entity_id, keys)
 
@@ -221,17 +257,7 @@ defmodule Livebook.Storage do
       :ets.delete_object(table, entry)
     end
 
-    {:reply, :ok, state, {:continue, :save_to_file}}
-  end
-
-  def handle_call({:delete, namespace, entity_id}, _from, %{table: table} = state) do
-    :ets.delete(table, {namespace, entity_id})
-    {:reply, :ok, state, {:continue, :save_to_file}}
-  end
-
-  def handle_call({:delete_key, namespace, entity_id, key}, _from, %{table: table} = state) do
-    delete_keys(table, namespace, entity_id, [key])
-    {:reply, :ok, state, {:continue, :save_to_file}}
+    :ok
   end
 
   @impl true

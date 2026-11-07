@@ -19,6 +19,7 @@ defmodule LivebookWeb.SettingsLive do
        },
        update_check_enabled: Livebook.UpdateCheck.enabled?(),
        dev_endpoints_enabled: Livebook.Settings.dev_endpoints_enabled?(),
+       dev_access_tokens: Livebook.Settings.fetch_dev_access_tokens(),
        release_info: Livebook.Config.github_release_info(),
        page_title: "Settings - Livebook"
      )}
@@ -125,6 +126,28 @@ defmodule LivebookWeb.SettingsLive do
                 </span>
               </.switch_field>
             </form>
+            <div :if={@dev_endpoints_enabled} class="flex flex-col space-y-4">
+              <h3 class="text-lg text-gray-800 font-medium">
+                Access tokens
+              </h3>
+              <p class="text-gray-700">
+                Require requests to include an access token. This is recommended
+                whenever Livebook is reachable from the network, otherwise anyone
+                with access to it can control your notebooks.
+              </p>
+
+              <.live_component
+                module={LivebookWeb.SettingsLive.DevAccessTokensComponent}
+                id="dev-access-tokens"
+                tokens={@dev_access_tokens}
+              />
+
+              <div>
+                <.button patch={~p"/settings/dev-access-token/new"} id="add-dev-access-token">
+                  Create access token
+                </.button>
+              </div>
+            </div>
           </div>
           <div class="flex flex-col space-y-4">
             <h2 class="text-xl text-gray-800 font-medium pb-2 border-b border-gray-200">
@@ -227,6 +250,20 @@ defmodule LivebookWeb.SettingsLive do
         id="env-var"
         env_var={@env_var}
         headline="Configure your application global environment variables."
+        return_to={~p"/settings"}
+      />
+    </.modal>
+
+    <.modal
+      :if={@live_action == :add_dev_access_token}
+      id="dev-access-token-modal"
+      show
+      width="medium"
+      patch={~p"/settings"}
+    >
+      <.live_component
+        module={LivebookWeb.SettingsLive.DevAccessTokenComponent}
+        id="dev-access-token"
         return_to={~p"/settings"}
       />
     </.modal>
@@ -381,6 +418,26 @@ defmodule LivebookWeb.SettingsLive do
      )}
   end
 
+  def handle_event("delete_dev_access_token", %{"id" => id}, socket) do
+    if token = Enum.find(socket.assigns.dev_access_tokens, &(&1.id == id)) do
+      on_confirm = fn socket ->
+        Livebook.Settings.delete_dev_access_token(id)
+        socket
+      end
+
+      {:noreply,
+       confirm(socket, on_confirm,
+         title: "Revoke #{token.name}",
+         description:
+           "Are you sure you want to revoke this access token? Tools using it will no longer be able to call the dev endpoints.",
+         confirm_text: "Revoke",
+         confirm_icon: "delete-bin-6-line"
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info({:set_file, file, _info}, socket) do
     {:noreply, update(socket, :autosave_path_state, &%{&1 | file: file})}
@@ -401,6 +458,11 @@ defmodule LivebookWeb.SettingsLive do
     env_vars = Enum.reject(socket.assigns.env_vars, &(&1.name == env_var.name))
 
     {:noreply, assign(socket, env_vars: env_vars, env_var: nil)}
+  end
+
+  def handle_info({event, _token}, socket)
+      when event in [:dev_access_token_created, :dev_access_token_deleted, :dev_access_token_used] do
+    {:noreply, assign(socket, dev_access_tokens: Livebook.Settings.fetch_dev_access_tokens())}
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}

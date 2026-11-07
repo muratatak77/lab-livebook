@@ -67,4 +67,158 @@ defmodule Livebook.SettingsTest do
       assert "cannot start with the LB_ prefix" in errors_on(changeset).name
     end
   end
+
+  describe "dev access tokens" do
+    setup do
+      on_exit(fn ->
+        for token <- Settings.fetch_dev_access_tokens() do
+          Settings.delete_dev_access_token(token.id)
+        end
+      end)
+    end
+
+    test "create_dev_access_token/1 stores only the token digest" do
+      refute Settings.dev_access_tokens_required?()
+
+      assert {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: " VS Code "})
+
+      assert "lb_dev_" <> _ = plain_token
+      assert token.name == "VS Code"
+      assert token.token_hint == String.slice(plain_token, -4, 4)
+      assert token.token_hash == Settings.DevAccessToken.hash(plain_token)
+      assert %DateTime{} = token.inserted_at
+      assert token.last_used_at == nil
+
+      assert Settings.fetch_dev_access_tokens() == [token]
+      assert Settings.dev_access_tokens_required?()
+
+      stored = Livebook.Storage.fetch!(:dev_access_tokens, token.id)
+      refute plain_token in Map.values(stored)
+    end
+
+    test "create_dev_access_token/1 generates a distinct token every time" do
+      {:ok, _, plain_token1} = Settings.create_dev_access_token(%{name: "First"})
+      {:ok, _, plain_token2} = Settings.create_dev_access_token(%{name: "Second"})
+
+      assert plain_token1 != plain_token2
+
+      assert [%{name: "First"}, %{name: "Second"}] = Settings.fetch_dev_access_tokens()
+    end
+
+    test "create_dev_access_token/1 returns changeset error" do
+      assert {:error, changeset} = Settings.create_dev_access_token(%{name: ""})
+      assert "can't be blank" in errors_on(changeset).name
+
+      long_name = String.duplicate("a", 65)
+      assert {:error, changeset} = Settings.create_dev_access_token(%{name: long_name})
+      assert "should be at most 64 character(s)" in errors_on(changeset).name
+
+      {:ok, _, _} = Settings.create_dev_access_token(%{name: "CLI"})
+      assert {:error, changeset} = Settings.create_dev_access_token(%{name: "cli"})
+      assert "has already been taken" in errors_on(changeset).name
+    end
+
+    test "verify_dev_access_token/1 matches the plain token and records usage" do
+      {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: "CLI"})
+
+      assert :error = Settings.verify_dev_access_token("lb_dev_invalid")
+      assert :error = Settings.verify_dev_access_token(token.token_hash)
+
+      assert {:ok, %{id: id, last_used_at: %DateTime{} = last_used_at}} =
+               Settings.verify_dev_access_token(plain_token)
+
+      assert id == token.id
+      assert [%{last_used_at: ^last_used_at}] = Settings.fetch_dev_access_tokens()
+    end
+
+    test "verify_dev_access_token/1 does not update usage more than once a minute" do
+      {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: "CLI"})
+
+      recently = DateTime.add(DateTime.utc_now(:second), -10)
+      Livebook.Storage.insert(:dev_access_tokens, token.id, last_used_at: recently)
+
+      assert {:ok, %{last_used_at: ^recently}} = Settings.verify_dev_access_token(plain_token)
+
+      long_ago = DateTime.add(DateTime.utc_now(:second), -120)
+      Livebook.Storage.insert(:dev_access_tokens, token.id, last_used_at: long_ago)
+
+      assert {:ok, %{last_used_at: last_used_at}} = Settings.verify_dev_access_token(plain_token)
+      assert DateTime.after?(last_used_at, long_ago)
+    end
+
+    test "verify_dev_access_token/1 does not recreate a token revoked while verifying" do
+      {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: "CLI"})
+      storage = Process.whereis(Livebook.Storage)
+
+      # Hold the Storage process, so the verification reads the token
+      # and then blocks on the usage write
+      :sys.suspend(storage)
+
+      task = Task.async(fn -> Settings.verify_dev_access_token(plain_token) end)
+
+      wait_until(fn ->
+        {:messages, messages} = Process.info(storage, :messages)
+
+        Enum.any?(
+          messages,
+          &match?({:"$gen_call", {pid, _}, {:update, _, _, _}} when pid == task.pid, &1)
+        )
+      end)
+
+      # Revoke the token before the queued write is processed
+      :sys.replace_state(storage, fn %{table: table} = state ->
+        :ets.match_delete(table, {{:dev_access_tokens, token.id}, :_, :_, :_})
+        state
+      end)
+
+      :sys.resume(storage)
+
+      assert :error = Task.await(task)
+      assert :error = Livebook.Storage.fetch(:dev_access_tokens, token.id)
+      refute Settings.dev_access_tokens_required?()
+    end
+
+    test "change_dev_access_token/2 validates name uniqueness" do
+      {:ok, _, _} = Settings.create_dev_access_token(%{name: "CLI"})
+
+      changeset = Settings.change_dev_access_token(%Settings.DevAccessToken{}, %{name: "cli"})
+      refute changeset.valid?
+      assert "has already been taken" in errors_on(changeset).name
+
+      refute Settings.change_dev_access_token(%Settings.DevAccessToken{}).valid?
+      assert Settings.change_dev_access_token(%Settings.DevAccessToken{}, %{name: "Other"}).valid?
+    end
+
+    test "delete_dev_access_token/1 revokes the token and notifies subscribers" do
+      Settings.subscribe()
+
+      {:ok, token, plain_token} = Settings.create_dev_access_token(%{name: "CLI"})
+      assert_receive {:dev_access_token_created, ^token}
+
+      assert :ok = Settings.delete_dev_access_token(token.id)
+      assert_receive {:dev_access_token_deleted, %{id: id}}
+      assert id == token.id
+
+      assert Settings.fetch_dev_access_tokens() == []
+      assert :error = Settings.verify_dev_access_token(plain_token)
+
+      # Deleting a missing token is a no-op
+      assert :ok = Settings.delete_dev_access_token(token.id)
+      refute_receive {:dev_access_token_deleted, _}
+    end
+  end
+
+  defp wait_until(fun, attempts \\ 100) do
+    cond do
+      fun.() ->
+        :ok
+
+      attempts == 0 ->
+        flunk("condition not met in time")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
+    end
+  end
 end

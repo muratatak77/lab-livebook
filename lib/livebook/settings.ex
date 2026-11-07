@@ -6,6 +6,7 @@ defmodule Livebook.Settings do
   alias Livebook.FileSystem
   alias Livebook.Storage
   alias Livebook.Settings.EnvVar
+  alias Livebook.Settings.DevAccessToken
 
   @doc """
   Returns the current autosave path.
@@ -78,6 +79,153 @@ defmodule Livebook.Settings do
   @spec set_dev_endpoints_enabled(boolean()) :: :ok
   def set_dev_endpoints_enabled(enabled) do
     Storage.insert(:settings, "global", dev_endpoints_enabled: enabled)
+  end
+
+  @doc """
+  Returns all dev endpoint access tokens, oldest first.
+  """
+  @spec fetch_dev_access_tokens() :: list(DevAccessToken.t())
+  def fetch_dev_access_tokens() do
+    for fields <- Storage.all(:dev_access_tokens) do
+      struct!(DevAccessToken, fields)
+    end
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+  end
+
+  @doc """
+  Returns whether requests to the dev endpoints must include an access
+  token.
+
+  Tokens are required as soon as at least one has been created.
+  """
+  @spec dev_access_tokens_required?() :: boolean()
+  def dev_access_tokens_required?() do
+    Storage.all(:dev_access_tokens) != []
+  end
+
+  @doc """
+  Creates a new dev endpoint access token.
+
+  On success, returns `{:ok, token, plain_token}`, the stored token
+  together with the plain token value. The plain value is not
+  persisted, so this is the only time it is available. Returns
+  `{:error, changeset}` if the attributes are invalid, for example
+  when the name is already taken.
+  """
+  @spec create_dev_access_token(map()) ::
+          {:ok, DevAccessToken.t(), String.t()} | {:error, Ecto.Changeset.t()}
+  def create_dev_access_token(attrs) do
+    changeset = change_dev_access_token(%DevAccessToken{}, attrs)
+
+    with {:ok, token} <- apply_action(changeset, :insert) do
+      plain_token = DevAccessToken.generate()
+
+      token = %{
+        token
+        | id: Livebook.Utils.random_short_id(),
+          token_hash: DevAccessToken.hash(plain_token),
+          token_hint: DevAccessToken.hint(plain_token),
+          inserted_at: DateTime.utc_now()
+      }
+
+      :ok = save_dev_access_token(token)
+      broadcast_settings_change({:dev_access_token_created, token})
+
+      {:ok, token, plain_token}
+    end
+  end
+
+  defp validate_dev_access_token_name_unique(changeset) do
+    name = Ecto.Changeset.get_field(changeset, :name)
+
+    if name && Enum.any?(fetch_dev_access_tokens(), &name_equal?(&1.name, name)) do
+      Ecto.Changeset.add_error(changeset, :name, "has already been taken")
+    else
+      changeset
+    end
+  end
+
+  defp name_equal?(left, right), do: String.downcase(left) == String.downcase(right)
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking access token changes.
+
+  Includes the name uniqueness check, so forms can report a taken
+  name before submitting.
+  """
+  @spec change_dev_access_token(DevAccessToken.t(), map()) :: Ecto.Changeset.t()
+  def change_dev_access_token(%DevAccessToken{} = token, attrs \\ %{}) do
+    token
+    |> DevAccessToken.changeset(attrs)
+    |> validate_dev_access_token_name_unique()
+  end
+
+  @doc """
+  Revokes the dev endpoint access token with the given id.
+
+  Always returns `:ok`, and does nothing if the token does not exist.
+  """
+  @spec delete_dev_access_token(String.t()) :: :ok
+  def delete_dev_access_token(id) do
+    with {:ok, fields} <- Storage.fetch(:dev_access_tokens, id) do
+      :ok = Storage.delete(:dev_access_tokens, id)
+      broadcast_settings_change({:dev_access_token_deleted, struct!(DevAccessToken, fields)})
+    end
+
+    :ok
+  end
+
+  # We don't need precise usage information, so we avoid writing the
+  # storage file on every single request
+  @last_used_at_resolution_s 60
+
+  @doc """
+  Looks up the access token matching the given plain token.
+
+  Returns `{:ok, token}` if a stored token matches, recording its
+  usage time. Returns `:error` if no token matches, or if the matching
+  token is revoked while it is being verified.
+  """
+  @spec verify_dev_access_token(String.t()) :: {:ok, DevAccessToken.t()} | :error
+  def verify_dev_access_token(plain_token) when is_binary(plain_token) do
+    hash = DevAccessToken.hash(plain_token)
+
+    token =
+      Enum.find(fetch_dev_access_tokens(), fn token ->
+        Plug.Crypto.secure_compare(token.token_hash, hash)
+      end)
+
+    if token do
+      touch_dev_access_token(token)
+    else
+      :error
+    end
+  end
+
+  defp touch_dev_access_token(token) do
+    now = DateTime.utc_now(:second)
+
+    if token.last_used_at == nil or
+         DateTime.diff(now, token.last_used_at) >= @last_used_at_resolution_s do
+      # The token may have been revoked since we read it, in which case
+      # we must not recreate it
+      case Storage.update(:dev_access_tokens, token.id, last_used_at: now) do
+        :ok ->
+          token = %{token | last_used_at: now}
+          broadcast_settings_change({:dev_access_token_used, token})
+          {:ok, token}
+
+        :error ->
+          :error
+      end
+    else
+      {:ok, token}
+    end
+  end
+
+  defp save_dev_access_token(token) do
+    attributes = token |> Map.from_struct() |> Map.delete(:id) |> Map.to_list()
+    Storage.insert(:dev_access_tokens, token.id, attributes)
   end
 
   @doc """
@@ -163,6 +311,9 @@ defmodule Livebook.Settings do
 
     * `{:env_var_set, env_var}`
     * `{:env_var_unset, env_var}`
+    * `{:dev_access_token_created, token}`
+    * `{:dev_access_token_deleted, token}`
+    * `{:dev_access_token_used, token}`
 
   """
   @spec subscribe() :: :ok | {:error, term()}
@@ -182,6 +333,10 @@ defmodule Livebook.Settings do
   #
   # Broadcasts given message under the `"settings"` topic.
   defp broadcast_env_vars_change(message) do
+    broadcast_settings_change(message)
+  end
+
+  defp broadcast_settings_change(message) do
     Phoenix.PubSub.broadcast(Livebook.PubSub, "settings", message)
   end
 
