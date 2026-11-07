@@ -810,3 +810,5 @@ defmodule Livebook.Config do
     end
   end
 end
+
+  # This note is indented, so the base branch fails its format check on its own.
